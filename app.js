@@ -56,44 +56,93 @@ validatePack(pack);
 const MAPS = { '2550Q': map2550Q, '2551Q': map2551Q };
 const PAGE_H = { '2550Q': 1008, '2551Q': 936 };
 
-const TAXPAYERS = [
+const LIVE = window.PH_MODE === 'live';
+const titleCase = (v) => String(v ?? '').toLowerCase().replace(/\b([a-z])/g, (m) => m.toUpperCase());
+
+const DEMO_TAXPAYERS = [
   {
-    id: 1, org: 'makati', display: 'Makati Digital Services Inc.', blurb: 'Software services, Makati City',
+    id: 1, org: 'makati', source: 'sample', display: 'Makati Digital Services Inc.', blurb: 'Software services, Makati City',
     tin: '009876543', branch_code: '00000', rdo_code: '047', registered_name: 'MAKATI DIGITAL SERVICES INC',
     address: 'UNIT 1203 SAMPLE BUILDING AYALA AVE MAKATI CITY METRO MANILA', zip: '1226', contact: '09990000001', email: 'makati.demo@example.com', classification: 'SMALL',
   },
   {
-    id: 2, org: 'bakeshop', display: 'Dela Cruz Bakeshop', blurb: 'Sole proprietor, Cebu City',
+    id: 2, org: 'bakeshop', source: 'sample', display: 'Dela Cruz Bakeshop', blurb: 'Sole proprietor, Cebu City',
     tin: '123456789', branch_code: '00000', rdo_code: '081', registered_name: 'DELA CRUZ JUAN SANTOS',
     address: '45 COLON ST BRGY STO NINO CEBU CITY', zip: '6000', contact: '09990000002', email: 'bakeshop.demo@example.com', classification: 'MICRO',
   },
 ];
-const SEED_REGS = [
+const DEMO_REGS = [
   { id: 1, taxpayer_id: 1, status: 'VAT', effective_from: '2019-03-01', cor_reference: 'COR OCN 2RC0000123456', source: 'BIR_2303', entered_by: 'M. Reyes (preparer)', entered_at: '2026-09-01T09:05:00Z', note: 'Head office' },
   { id: 2, taxpayer_id: 2, status: 'NON_VAT', effective_from: '2023-01-15', cor_reference: 'COR OCN 2RC0000654321', source: 'BIR_2303', entered_by: 'M. Reyes (preparer)', entered_at: '2026-09-01T09:12:00Z', note: 'Sole proprietor, 8% option not availed' },
 ];
 
+// In live mode everything below comes from the local server (live Xero data);
+// in demo mode it is built from the sample organisations.
+let TAXPAYERS = [];
+let SEED_REGS = [];
+let LEDGER = {};
+let SERVER = null;
 let lineSeq = 0;
-const LEDGER = {};
-for (const tp of TAXPAYERS) {
-  const docs = SAMPLE_ORGS[tp.org].docs().map((doc) => {
-    const lines = normalizeXeroDocument(doc, 'PHP', 'sample').map((l) => ({
-      id: ++lineSeq, taxpayer_id: tp.id, source: l.source, source_doc_id: l.sourceDocId, source_line_id: l.sourceLineId,
+
+function docDateOf(doc) {
+  if (doc.DateString) return doc.DateString.slice(0, 10);
+  const m = /\/Date\((\d+)/.exec(doc.Date ?? '');
+  return m ? new Date(Number(m[1])).toISOString().slice(0, 10) : String(doc.Date ?? '').slice(0, 10);
+}
+
+function buildLedger(tpId, entries) {
+  const docs = entries.map(({ doc, source, base }) => {
+    const lines = normalizeXeroDocument(doc, base ?? 'PHP', source).map((l) => ({
+      id: ++lineSeq, taxpayer_id: tpId, source: l.source, source_doc_id: l.sourceDocId, source_line_id: l.sourceLineId,
       doc_type: l.docType, doc_number: l.docNumber, doc_date: l.docDate, doc_status: l.docStatus, contact: l.contact,
       description: l.description, account_code: l.accountCode, source_tax_code: l.sourceTaxCode, net: l.net, tax: l.tax, gross: l.gross, currency: l.currency,
     }));
-    return { doc, id: doc.InvoiceID ?? doc.CreditNoteID, number: doc.InvoiceNumber ?? doc.CreditNoteNumber, date: doc.DateString.slice(0, 10), lines };
+    return { doc, source, id: doc.InvoiceID ?? doc.CreditNoteID, number: doc.InvoiceNumber ?? doc.CreditNoteNumber ?? '(no number)', date: docDateOf(doc), lines };
   });
   docs.sort((a, b) => b.date.localeCompare(a.date) || String(b.number).localeCompare(String(a.number)));
-  LEDGER[tp.id] = { docs, lines: docs.flatMap((d) => d.lines).sort((a, b) => a.doc_date.localeCompare(b.doc_date) || a.id - b.id) };
+  return { docs, lines: docs.flatMap((d) => d.lines).sort((a, b) => a.doc_date.localeCompare(b.doc_date) || a.id - b.id) };
 }
 
+async function loadData() {
+  lineSeq = 0;
+  LEDGER = {};
+  if (!LIVE) {
+    TAXPAYERS = DEMO_TAXPAYERS;
+    SEED_REGS = DEMO_REGS;
+    for (const tp of TAXPAYERS) LEDGER[tp.id] = buildLedger(tp.id, SAMPLE_ORGS[tp.org].docs().map((doc) => ({ doc, source: 'sample' })));
+    return;
+  }
+  const r = await fetch('api/state', { cache: 'no-store' });
+  if (!r.ok) throw new Error('Could not load workspace data from the server');
+  SERVER = await r.json();
+  TAXPAYERS = SERVER.taxpayers.map((t) => ({
+    ...t,
+    display: t.trade_name || titleCase(t.registered_name),
+    blurb: [t.classification ? titleCase(t.classification) : null, t.connection ? (t.source === 'xero' ? `Xero: ${t.connection.org_name}` : 'Sample organisation') : 'No data source yet'].filter(Boolean).join(' · '),
+  }));
+  SEED_REGS = SERVER.registrations;
+  for (const t of TAXPAYERS) {
+    LEDGER[t.id] = buildLedger(t.id, (SERVER.documents[t.id] ?? []).map((d) => ({ doc: d.doc, source: d.source, base: t.connection?.base_currency || 'PHP' })));
+  }
+}
+await loadData();
+const isSampleTp = (tp) => !LIVE || tp?.source === 'sample';
+
+const xeroUrl = (d) => {
+  const id = encodeURIComponent(d.id);
+  return {
+    ACCREC: `https://go.xero.com/AccountsReceivable/View.aspx?InvoiceID=${id}`,
+    ACCPAY: `https://go.xero.com/AccountsPayable/View.aspx?InvoiceID=${id}`,
+    ACCRECCREDIT: `https://go.xero.com/AccountsReceivable/ViewCreditNote.aspx?creditNoteID=${id}`,
+    ACCPAYCREDIT: `https://go.xero.com/AccountsPayable/ViewCreditNote.aspx?creditNoteID=${id}`,
+  }[d.doc.Type];
+};
 const DOC_TYPE = { ACCREC: 'Sales invoice', ACCPAY: 'Bill', ACCRECCREDIT: 'Sales credit note', ACCPAYCREDIT: 'Supplier credit note' };
 const CLASSES = Object.keys(pack.classes);
 
 // ---------------------------------------------------------------- state
 
-const STORE = 'ph-tax-engine-demo-v1';
+const STORE = LIVE ? 'ph-tax-engine-live-v1' : 'ph-tax-engine-demo-v1';
 const fresh = () => ({ view: 'overview', tp: 1, year: 2026, quarter: 3, regsAdded: [], acks: {}, mapOverrides: {}, inputs: {}, events: [], visited: [], seg: 0, page: {}, sel: {}, trace: {}, doc: {}, asOf: {}, regDraft: {} });
 let S = (() => {
   try {
@@ -102,13 +151,23 @@ let S = (() => {
   } catch { /* storage unavailable */ }
   return fresh();
 })();
+if (!TAXPAYERS.some((t) => t.id === S.tp)) S.tp = TAXPAYERS[0]?.id ?? null;
 const save = () => {
   try { localStorage.setItem(STORE, JSON.stringify(S)); } catch { /* storage unavailable */ }
 };
-const VIEWER = 'You (demo viewer)';
+const VIEWER = LIVE ? 'You' : 'You (demo viewer)';
 function logEvent(action, entity, details) {
+  if (LIVE) { api('events', { action, entity, details }).catch(() => {}); return; }
   S.events.push({ ts: new Date().toISOString(), actor: VIEWER, action, entity, details });
 }
+async function api(path, payload) {
+  const r = await fetch(`api/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `Request failed (${r.status})`);
+  return j;
+}
+const acksMap = () => (LIVE ? SERVER.acks : S.acks);
+const inputsMap = () => (LIVE ? SERVER.inputs : S.inputs);
 
 // ---------------------------------------------------------------- engine calls
 
@@ -117,6 +176,7 @@ const byEff = (a, b) => a.effective_from.localeCompare(b.effective_from) || a.id
 const history = (id) => [...SEED_REGS, ...S.regsAdded].filter((r) => r.taxpayer_id === id).sort(byEff);
 
 function mappingsFor(id) {
+  if (LIVE) return SERVER.mappings[id] ?? [];
   const out = [];
   for (const m of defaultMappings(defaults, 'sample')) {
     const o = S.mapOverrides[`${id}|${m.source}|${m.source_tax_code}`];
@@ -126,19 +186,19 @@ function mappingsFor(id) {
   return out;
 }
 const classifyFor = (id) => (lines) => classifyWithMap(lines, mappingsFor(id));
-const linesIn = (id, from, to) => LEDGER[id].lines.filter((l) => l.doc_date >= from && l.doc_date <= to);
+const linesIn = (id, from, to) => (LEDGER[id]?.lines ?? []).filter((l) => l.doc_date >= from && l.doc_date <= to);
 
 function thresholdAt(id, asOf) {
   const reg = registrationOn(history(id), asOf);
   if (!reg || reg.status !== 'NON_VAT') return null;
-  return assessThresholdCore(pack, reg, classifyFor(id)(LEDGER[id].lines).classified, asOf);
+  return assessThresholdCore(pack, reg, classifyFor(id)(LEDGER[id]?.lines ?? []).classified, asOf);
 }
 
 function quarterRuns(id = S.tp, year = S.year, quarter = S.quarter) {
   const { start, end } = quarterBounds(year, quarter);
   const segs = segmentsFromHistory(history(id), start, end);
   if (!segs.length || segs.some((s) => !s.reg)) return { error: `No Form 2303 registration covers ${start} to ${end}. Record one on the Overview.`, runs: [] };
-  const inputs = S.inputs[`${id}|${year}Q${quarter}`] ?? {};
+  const inputs = inputsMap()[`${id}|${year}Q${quarter}`] ?? {};
   const runs = segs.map((seg) => ({
     ...computeReturn({ pack, taxpayer: tpById(id), year, quarter, seg, split: segs.length > 1, lines: linesIn(id, seg.from, seg.to), classifyFn: classifyFor(id), inputs, threshold: thresholdAt(id, seg.to) }),
     runId: `demo-${id}-${seg.from}`,
@@ -149,20 +209,41 @@ function quarterRuns(id = S.tp, year = S.year, quarter = S.quarter) {
 const findingKey = (id, run, f) => `${id}|${run.period.from}|${f.kind}|${hashStr(f.message)}`;
 function openFindings(id, runs) {
   let n = 0;
-  for (const r of runs) for (const f of r.findings) if (!S.acks[findingKey(id, r, f)]) n++;
+  for (const r of runs) for (const f of r.findings) if (!acksMap()[findingKey(id, r, f)]) n++;
   return n;
 }
 
 // ---------------------------------------------------------------- walkthrough
 
-const STEPS = [
-  { t: 'Xero data in', d: 'Invoices, bills and credit notes in Xero API format, normalized line by line.', tp: 1, view: 'data', focus: 'p-docs' },
-  { t: 'Form 2303 picks the path', d: 'VAT goes to 2550Q, non-VAT to 2551Q. Only a 2303 record changes it.', tp: 1, view: 'overview', focus: 'p-registration' },
-  { t: 'Threshold advisory', d: 'A non-VAT taxpayer passes PHP 3M. Flagged for review, status unchanged.', tp: 2, view: 'overview', focus: 'p-threshold' },
-  { t: 'Invoice to official form', d: 'INV-0142 traced through every formula to item 26 on the 2550Q.', tp: 1, view: 'trace', focus: 'p-trace', trace: 'INV-0142' },
-];
+function steps() {
+  if (!LIVE) {
+    return [
+      { t: 'Xero data in', d: 'Invoices, bills and credit notes in Xero API format, normalized line by line.', tp: 1, view: 'data', focus: 'p-docs' },
+      { t: 'Form 2303 picks the path', d: 'VAT goes to 2550Q, non-VAT to 2551Q. Only a 2303 record changes it.', tp: 1, view: 'overview', focus: 'p-registration' },
+      { t: 'Threshold advisory', d: 'A non-VAT taxpayer passes PHP 3M. Flagged for review, status unchanged.', tp: 2, view: 'overview', focus: 'p-threshold' },
+      { t: 'Invoice to official form', d: 'INV-0142 traced through every formula to item 26 on the 2550Q.', tp: 1, view: 'trace', focus: 'p-trace' },
+    ];
+  }
+  const live = TAXPAYERS.find((t) => t.source === 'xero') ?? TAXPAYERS[0];
+  const nonVat = TAXPAYERS.find((t) => history(t.id).some((r) => r.status === 'NON_VAT')) ?? live;
+  if (!live) return [];
+  const org = live.connection?.org_name ?? 'Xero';
+  return [
+    { t: 'Xero data in', d: `Invoices, bills and credit notes pulled live from ${org}, normalized line by line.`, tp: live.id, view: 'data', focus: 'p-docs' },
+    { t: 'Form 2303 picks the path', d: 'VAT goes to 2550Q, non-VAT to 2551Q. Only a 2303 record changes it.', tp: live.id, view: 'overview', focus: 'p-registration' },
+    { t: 'Threshold advisory', d: 'A non-VAT taxpayer passes PHP 3M. Flagged for review, status unchanged.', tp: nonVat.id, view: 'overview', focus: 'p-threshold' },
+    { t: 'Invoice to official form', d: 'One invoice traced through every formula to the amount payable on the form.', tp: live.id, view: 'trace', focus: 'p-trace' },
+  ];
+}
+
+/** A good document to show first: a multi-line sales invoice in the period, else any posted sale. */
+function featuredDoc(tpId, from, to) {
+  const docs = (LEDGER[tpId]?.docs ?? []).filter((d) => d.lines.length && (!from || (d.date >= from && d.date <= to)));
+  return docs.find((d) => d.number === 'INV-0142') ?? docs.find((d) => d.doc.Type === 'ACCREC' && d.lines.length > 1) ?? docs.find((d) => d.doc.Type === 'ACCREC') ?? docs[0] ?? null;
+}
 
 function renderTour() {
+  const STEPS = steps();
   const active = STEPS.findIndex((s) => s.view === S.view && s.tp === S.tp);
   $('#tour').innerHTML = STEPS.map((s, i) => `
     <button type="button" class="step${i === active ? ' active' : ''}${S.visited.includes(i) ? ' done' : ''}" data-act="step" data-i="${i}" aria-pressed="${i === active}">
@@ -192,13 +273,14 @@ function renderRail(ctx) {
   const quarters = [];
   for (const y of [2025, 2026]) for (const q of [1, 2, 3, 4]) quarters.push([y, q]);
   $('#rail').innerHTML = `
-    <div class="rail-sec"><span class="eyebrow">Client workspace</span><div class="small" style="font-weight:500">Demo Accounting Firm</div></div>
+    <div class="rail-sec"><span class="eyebrow">Client workspace</span><div class="small" style="font-weight:500">${esc(LIVE ? SERVER.workspace : 'Demo Accounting Firm')}</div></div>
     <div class="rail-sec"><span class="eyebrow">Taxpayers</span>
       <div class="tps stack" style="gap:8px">${TAXPAYERS.map((t) => `
         <button type="button" class="tp${t.id === S.tp ? ' active' : ''}" data-act="tp" data-id="${t.id}">
           <span class="tp-name">${esc(t.display)}</span>
-          <span class="tp-meta"><span class="num">${fmtTin(t.tin)}</span>${statusChip(registrationOn(history(t.id), end)?.status)}</span>
+          <span class="tp-meta"><span class="num">${fmtTin(t.tin)}</span>${statusChip(registrationOn(history(t.id), end)?.status)}${LIVE && t.source === 'xero' ? '<span class="chip ok">Xero</span>' : ''}</span>
         </button>`).join('')}
+        ${LIVE ? '<button type="button" class="btn ghost" style="justify-content:flex-start" data-act="view" data-v="add">+ Add taxpayer</button>' : ''}
       </div>
     </div>
     <div class="rail-sec"><label class="eyebrow" for="period">Return period</label>
@@ -311,9 +393,13 @@ function thresholdChart(series, threshold, advisory, sel) {
 function thresholdPanel(tp, ctx) {
   const { end, runs } = ctx.q;
   const everNonVat = history(tp.id).some((r) => r.status === 'NON_VAT');
+  const other = TAXPAYERS.find((t) => t.id !== tp.id && history(t.id).some((r) => r.status === 'NON_VAT'));
   if (!everNonVat) {
     return `<article class="panel" id="p-threshold"><div class="panel-h"><div><h2>VAT threshold monitor</h2><p class="small muted">Runs for non-VAT taxpayers only.</p></div><span class="chip neutral">Not applicable</span></div>
-      <p class="small">${esc(tp.display)} is VAT-registered for the whole period, so there is no registration threshold to watch. Switch to <button type="button" class="btn ghost" style="padding:0 4px;color:var(--accent)" data-act="tp" data-id="2">Dela Cruz Bakeshop</button> to see the advisory.</p></article>`;
+      <p class="small">${esc(tp.display)} is VAT-registered for the whole period, so there is no registration threshold to watch.${other ? ` Switch to <button type="button" class="btn ghost" style="padding:0 4px;color:var(--accent)" data-act="tp" data-id="${other.id}">${esc(other.display)}</button> to see the advisory.` : ''}</p></article>`;
+  }
+  if (!LEDGER[tp.id]?.lines.length) {
+    return `<article class="panel" id="p-threshold"><div class="panel-h"><div><h2>VAT threshold monitor</h2><p class="small muted">No sales in the ledger yet.</p></div><span class="chip neutral">Waiting for data</span></div></article>`;
   }
   const lines = classifyFor(tp.id)(LEDGER[tp.id].lines).classified;
   const firstYm = LEDGER[tp.id].lines[0].doc_date.slice(0, 7);
@@ -363,7 +449,7 @@ function reviewPanel(tp, runs) {
   const rows = runs.flatMap((r) => r.findings.map((f) => ({ r, f, key: findingKey(tp.id, r, f) })));
   const body = rows.length
     ? rows.map(({ r, f, key }) => {
-        const ack = S.acks[key];
+        const ack = acksMap()[key];
         return `<div class="finding ${f.severity}">
           <span class="chip ${f.severity === 'CRITICAL' ? 'crit' : 'warn'}">${esc(f.severity)}</span>
           <div><div class="k">${esc(f.kind)} &middot; ${r.form} ${esc(r.period.from)} to ${esc(r.period.to)}</div><div class="m">${esc(f.message)}</div>
@@ -408,41 +494,86 @@ function normNotes(d) {
   return notes;
 }
 
-function viewData() {
-  const tp = tpById(S.tp);
-  const L = LEDGER[tp.id];
-  const org = SAMPLE_ORGS[tp.org].name.replace(' (sample)', '');
-  const selId = S.doc[tp.id] ?? L.docs.find((d) => d.number === 'INV-0142')?.id ?? L.docs[0].id;
-  const sel = L.docs.find((d) => d.id === selId) ?? L.docs[0];
+function connectionPanel(tp, L) {
   const posted = L.docs.filter((d) => d.lines.length).length;
   const credits = L.docs.filter((d) => d.doc.Type.endsWith('CREDIT')).length;
-  const mapRows = defaultMappings(defaults, 'sample').map((m) => {
-    const key = `${tp.id}|${m.source}|${m.source_tax_code}`;
-    const cur = S.mapOverrides[key] ?? m.ph_class;
-    const used = L.lines.filter((l) => `${l.doc_type.startsWith('SALE') ? 'SALE' : 'PURCHASE'}:${l.source_tax_code}` === m.source_tax_code).length;
-    return `<tr><td class="num small">${esc(m.source_tax_code)}</td><td class="r num small">${used}</td>
-      <td><select class="map${cur === '' ? ' unmapped' : ''}" data-act="map" data-key="${esc(key)}" aria-label="PH class for ${esc(m.source_tax_code)}">
-        <option value=""${cur === '' ? ' selected' : ''}>(unmapped: hold lines out)</option>
-        ${CLASSES.map((c) => `<option${c === cur ? ' selected' : ''}>${c}</option>`).join('')}</select></td>
-      <td class="small muted">${esc(pack.classes[cur] ?? 'Lines using this code are excluded and raised as a critical finding.')}</td></tr>`;
-  }).join('');
-
-  return `
-    <section class="vhead"><div><div class="eyebrow">Accounting data</div><h1>${esc(org)}</h1><p class="sub small">Documents in Xero Accounting API format, base currency PHP.</p></div></section>
-    <article class="panel" id="p-source">
-      <div class="panel-h"><div><h2>Connection</h2><p class="small muted">This demo loads a sample organisation. The installed version connects to your Xero organisation with OAuth 2.0 and read-only scopes.</p></div><span class="chip ok">${I.check.replace('<svg', '<svg width="12" height="12"')} Synced</span></div>
-      <div class="kv">
-        <div>Endpoints</div><div class="mono small">GET /api.xro/2.0/Invoices, /CreditNotes, /Organisation, /TaxRates (paged, date-filtered)</div>
-        <div>Scopes</div><div class="scopes">${['accounting.invoices.read', 'accounting.contacts.read', 'accounting.settings.read', 'offline_access'].map((s) => `<span class="chip neutral mono">${s}</span>`).join('')}</div>
-        <div>Security</div><div class="small">Tokens encrypted at rest (AES-256-GCM), refreshed automatically, rate limits respected</div>
-      </div>
-      <div class="kpis" style="margin-top:14px">
+  const kpis = `<div class="kpis" style="margin-top:14px">
         <div class="kpi"><div class="eyebrow">Documents pulled</div><div class="v">${L.docs.length}</div></div>
         <div class="kpi"><div class="eyebrow">Posted to ledger</div><div class="v">${posted}</div></div>
         <div class="kpi"><div class="eyebrow">Ledger lines</div><div class="v">${L.lines.length}</div></div>
         <div class="kpi"><div class="eyebrow">Credit notes</div><div class="v">${credits}</div></div>
-      </div>
-    </article>
+      </div>`;
+  const scopes = `<div>Scopes</div><div class="scopes">${['accounting.invoices.read', 'accounting.contacts.read', 'accounting.settings.read', 'offline_access'].map((x) => `<span class="chip neutral mono">${x}</span>`).join('')}</div>`;
+  const endpoints = '<div>Endpoints</div><div class="mono small">GET /api.xro/2.0/Invoices, /CreditNotes, /Organisation, /TaxRates (paged, date-filtered)</div>';
+  const synced = `<span class="chip ok">${I.check.replace('<svg', '<svg width="12" height="12"')} Synced</span>`;
+  if (!LIVE || tp.source === 'sample') {
+    return `<article class="panel" id="p-source">
+      <div class="panel-h"><div><h2>Connection</h2><p class="small muted">${LIVE ? 'Sample organisation loaded offline in Xero API format.' : 'This demo loads a sample organisation. The installed version connects to your Xero organisation with OAuth 2.0 and read-only scopes.'}</p></div>${synced}</div>
+      <div class="kv">${endpoints}${scopes}<div>Security</div><div class="small">Tokens encrypted at rest (AES-256-GCM), refreshed automatically, rate limits respected</div></div>${kpis}</article>`;
+  }
+  const c = tp.connection;
+  if (!c || tp.source !== 'xero') {
+    const action = SERVER.xero.configured
+      ? `<a class="btn primary" href="connect/xero?taxpayer=${tp.id}">${I.data}Connect to Xero</a>`
+      : '<p class="err-text">Xero is not configured on this server yet: add XERO_CLIENT_ID and XERO_CLIENT_SECRET to .env and restart.</p>';
+    return `<article class="panel" id="p-source"><div class="panel-h"><div><h2>Connect to Xero</h2><p class="small muted">Authorise read access to this taxpayer's Xero organisation. You sign in on Xero's own page, so this app never sees your Xero password.</p></div></div>${action}</article>`;
+  }
+  const { end } = quarterBounds(S.year, S.quarter);
+  const seed = SERVER.xero.writeEnabled
+    ? '<div class="small muted" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">Demo organisation: <button type="button" class="btn" style="padding:3px 10px" data-act="seed-xero">Create sample PH invoices in this Xero org</button></div>'
+    : '';
+  return `<article class="panel" id="p-source">
+      <div class="panel-h"><div><h2>Connected to ${esc(c.org_name)}</h2><p class="small muted">Live Xero organisation &middot; base currency ${esc(c.base_currency || 'shown after the first sync')} &middot; last sync ${esc(c.last_sync_at ? `${c.last_sync_at} UTC` : 'not yet')}</p></div><span class="chip ok">${I.check.replace('<svg', '<svg width="12" height="12"')} Connected</span></div>
+      <div class="kv">${endpoints}<div>Security</div><div class="small">OAuth 2.0; tokens encrypted at rest (AES-256-GCM) and refreshed automatically</div></div>
+      <form class="rec" data-form="sync" style="margin-top:12px"><div class="rec-row">
+        <div class="field"><label for="sync-from">From</label><input id="sync-from" type="date" value="${esc(S.syncFrom ?? '2025-07-01')}"></div>
+        <div class="field"><label for="sync-to">To</label><input id="sync-to" type="date" value="${esc(S.syncTo ?? end)}"></div>
+        <div class="field"><span>&nbsp;</span><button class="btn primary" type="submit" id="sync-btn">${I.data}Sync from Xero now</button></div></div>
+        ${seed}
+      </form>${kpis}</article>`;
+}
+
+function mappingRows(tp, L) {
+  const current = new Map(mappingsFor(tp.id).map((m) => [`${m.source}|${m.source_tax_code}`, m]));
+  const keys = new Map();
+  if (!LIVE) for (const m of defaultMappings(defaults, 'sample')) keys.set(`${m.source}|${m.source_tax_code}`, { source: m.source, key: m.source_tax_code });
+  for (const m of current.values()) keys.set(`${m.source}|${m.source_tax_code}`, { source: m.source, key: m.source_tax_code });
+  for (const l of L.lines) {
+    const key = `${l.doc_type.startsWith('SALE') ? 'SALE' : 'PURCHASE'}:${l.source_tax_code}`;
+    keys.set(`${l.source}|${key}`, { source: l.source, key });
+  }
+  const used = (k) => L.lines.filter((l) => `${l.source}|${l.doc_type.startsWith('SALE') ? 'SALE' : 'PURCHASE'}:${l.source_tax_code}` === k).length;
+  const entries = [...keys.entries()].sort((a, b) => used(b[0]) - used(a[0]) || a[0].localeCompare(b[0]));
+  const shown = entries.filter(([k]) => used(k));
+  const hidden = entries.length - shown.length;
+  return shown
+    .map(([k, { source, key }]) => {
+      const cur = current.get(k)?.ph_class ?? '';
+      return `<tr><td class="num small">${esc(key)}${used(k) && !cur ? ' <span class="chip crit">unmapped</span>' : ''}</td><td class="r num small">${used(k)}</td>
+      <td><select class="map${cur === '' ? ' unmapped' : ''}" data-act="map" data-tp="${tp.id}" data-source="${esc(source)}" data-key="${esc(key)}" aria-label="PH class for ${esc(key)}">
+        <option value=""${cur === '' ? ' selected' : ''}>(unmapped: hold lines out)</option>
+        ${CLASSES.map((c) => `<option${c === cur ? ' selected' : ''}>${c}</option>`).join('')}</select></td>
+      <td class="small muted">${esc(pack.classes[cur] ?? 'Lines using this code are excluded and raised as a critical finding.')}</td></tr>`;
+    }).join('') + (hidden ? `<tr><td colspan="4" class="tiny muted">${hidden} more default mapping${hidden === 1 ? '' : 's'} not used by this organisation's documents.</td></tr>` : '');
+}
+
+function viewData() {
+  const tp = tpById(S.tp);
+  if (!tp) return '<section class="vhead"><h1>No taxpayers yet</h1></section>';
+  const L = LEDGER[tp.id] ?? { docs: [], lines: [] };
+  const org = tp.source === 'xero' ? tp.connection?.org_name ?? tp.display : !LIVE ? SAMPLE_ORGS[tp.org].name.replace(' (sample)', '') : tp.display;
+  if (!L.docs.length) {
+    return `<section class="vhead"><div><div class="eyebrow">Accounting data</div><h1>${esc(org)}</h1><p class="sub small">No documents pulled yet.</p></div></section>${connectionPanel(tp, L)}`;
+  }
+  const selId = S.doc[tp.id] ?? featuredDoc(tp.id)?.id ?? L.docs[0].id;
+  const sel = L.docs.find((d) => d.id === selId) ?? L.docs[0];
+  const posted = L.docs.filter((d) => d.lines.length).length;
+  const credits = L.docs.filter((d) => d.doc.Type.endsWith('CREDIT')).length;
+  const mapRows = mappingRows(tp, L);
+
+  return `
+    <section class="vhead"><div><div class="eyebrow">Accounting data</div><h1>${esc(org)}</h1><p class="sub small">${tp.source === 'xero' ? 'Documents pulled live from the Xero Accounting API.' : 'Documents in Xero Accounting API format, base currency PHP.'}</p></div></section>
+    ${connectionPanel(tp, L)}
     <div class="split" id="p-docs">
       <article class="panel"><div class="panel-h"><h2>Documents</h2><span class="small muted">Select one to see the raw record</span></div>
         <div class="scroll-x" id="doc-list" style="max-height:600px;overflow:auto"><table>
@@ -454,7 +585,7 @@ function viewData() {
       </article>
       <article class="panel">
         <div class="panel-h"><div><h2>${esc(sel.number)} &middot; ${esc(DOC_TYPE[sel.doc.Type])}</h2><p class="small muted">${esc(sel.doc.Contact.Name)} &middot; ${esc(niceDate(sel.date))}</p></div>
-          ${sel.lines.length ? `<button type="button" class="btn" data-act="trace-doc" data-n="${esc(sel.number)}">${I.trace}Trace to form</button>` : '<span class="chip warn">Not posted</span>'}</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">${sel.source === 'xero' ? `<a class="btn" href="${xeroUrl(sel)}" target="_blank" rel="noopener">Open in Xero &#8599;</a>` : ''}${sel.lines.length ? `<button type="button" class="btn" data-act="trace-doc" data-n="${esc(sel.number)}">${I.trace}Trace to form</button>` : '<span class="chip warn">Not posted</span>'}</div></div>
         <div class="eyebrow" style="margin-bottom:6px">Xero payload</div>
         <pre class="json">${jsonHTML(sel.doc)}</pre>
         <div class="eyebrow" style="margin:14px 0 6px">Normalized ledger lines</div>
@@ -503,7 +634,7 @@ function sheetHTML(run, pageIdx, active, related = []) {
   }).join('');
   const glyphs = lay.glyphs.filter((g) => g.page === pageIdx).map((g) =>
     `<span class="g${g.anchor === 'right' ? ' right' : ''}" style="left:${p(g.x, W)}%;top:${p(g.y, H)}%;font-size:${p(g.size, W)}cqw">${esc(g.text)}</span>`).join('');
-  return `<div class="sheet"><img src="assets/forms/${run.form}-p${pageIdx + 1}.png" width="1224" height="${H * 2}" alt="Official BIR Form ${run.form}, page ${pageIdx + 1}, populated by the engine">${regions}${glyphs}<div class="wm" aria-hidden="true"><span>SAMPLE DATA &middot; NOT FOR FILING</span></div></div>`;
+  return `<div class="sheet"><img src="assets/forms/${run.form}-p${pageIdx + 1}.png" width="1224" height="${H * 2}" alt="Official BIR Form ${run.form}, page ${pageIdx + 1}, populated by the engine">${regions}${glyphs}${isSampleTp(tpById(S.tp)) ? '<div class="wm" aria-hidden="true"><span>SAMPLE DATA &middot; NOT FOR FILING</span></div>' : ''}</div>`;
 }
 
 function lineageHTML(run, it) {
@@ -586,7 +717,7 @@ function viewTrace(ctx) {
   const { runs, start, end } = ctx.q;
   const L = LEDGER[tp.id];
   const inQuarter = L.docs.filter((d) => start && d.date >= start && d.date <= end);
-  const pick = S.trace[tp.id] ?? (tp.id === 1 ? 'INV-0142' : inQuarter.find((d) => d.doc.Type === 'ACCREC')?.number);
+  const pick = S.trace[tp.id] ?? featuredDoc(tp.id, start, end)?.number ?? inQuarter[0]?.number;
   const d = inQuarter.find((x) => x.number === pick) ?? inQuarter[0];
   const options = inQuarter.map((x) => `<option value="${esc(x.number)}"${x === d ? ' selected' : ''}>${esc(x.number)} &middot; ${esc(x.doc.Contact.Name)}</option>`).join('');
   const head = `<section class="vhead"><div><div class="eyebrow">${esc(tp.display)} &middot; ${S.year} Q${S.quarter}</div><h1>Trace a transaction</h1><p class="sub small">Follow one document from the ledger to the populated official form.</p></div>
@@ -634,7 +765,7 @@ function viewTrace(ctx) {
 
 // ---------------------------------------------------------------- audit
 
-const SEED_EVENTS = [
+const demoSeedEvents = () => [
   { ts: '2026-09-01T09:00:00Z', actor: 'M. Reyes (preparer)', action: 'workspace.create', entity: 'workspace', details: { name: 'Demo Accounting Firm' } },
   ...TAXPAYERS.flatMap((t, i) => {
     const reg = SEED_REGS[i];
@@ -655,7 +786,13 @@ async function sha256(s) {
 }
 
 function viewAudit() {
-  const events = [...SEED_EVENTS, ...S.events];
+  if (LIVE) {
+    const rows = [...SERVER.events].reverse().map((e) => `<tr><td class="num small">${e.id}</td><td class="num small">${esc(String(e.ts).replace('T', ' ').slice(0, 19))}</td><td class="small">${esc(e.actor)}</td><td class="ev-action">${esc(e.action)}</td><td class="small">${esc(e.entity)}<div class="tiny mono muted" style="word-break:break-word">${esc(JSON.stringify(e.details))}</div></td><td class="hash">${esc(e.hash.slice(0, 12))}</td></tr>`).join('');
+    const chip = SERVER.chain.ok ? `<span class="chip ok">Hash chain verified \u00b7 ${SERVER.events.length} latest entries</span>` : `<span class="chip crit">Chain broken at entry ${SERVER.chain.brokenAt}</span>`;
+    return `<section class="vhead"><div><div class="eyebrow">Traceability</div><h1>Audit trail</h1><p class="sub small">Every Xero connection and sync, 2303 record, mapping change, review and export is logged by the server. Each entry's SHA-256 covers the entry before it, and the database blocks edits and deletes.</p></div>${chip}</section>
+      <article class="panel"><div class="scroll-x"><table><thead><tr><th>#</th><th>Time (UTC)</th><th>Actor</th><th>Action</th><th>Detail</th><th>Hash</th></tr></thead><tbody>${rows}</tbody></table></div></article>`;
+  }
+  const events = [...demoSeedEvents(), ...S.events];
   queueMicrotask(async () => {
     const el = $('#audit-body');
     if (!el || !crypto?.subtle) return;
@@ -672,6 +809,21 @@ function viewAudit() {
   });
   return `<section class="vhead"><div><div class="eyebrow">Traceability</div><h1>Audit trail</h1><p class="sub small">Every sync, 2303 record, mapping change, review and export is logged. Each entry's SHA-256 covers the entry before it, so an edited entry breaks the chain. Your actions in this demo appear at the top.</p></div><span class="chip neutral" id="chain-chip">Verifying&hellip;</span></section>
     <article class="panel"><div class="scroll-x"><table><thead><tr><th>#</th><th>Time (UTC)</th><th>Actor</th><th>Action</th><th>Detail</th><th>Hash</th></tr></thead><tbody id="audit-body"><tr><td colspan="6" class="muted small">Computing hashes&hellip;</td></tr></tbody></table></div></article>`;
+}
+
+// ---------------------------------------------------------------- add taxpayer (live)
+
+function viewAdd() {
+  const f = (id, label, attrs = '') => `<div class="field"><label for="${id}">${label}</label><input id="${id}" ${attrs}></div>`;
+  return `<section class="vhead"><div><div class="eyebrow">Client workspace</div><h1>Add taxpayer</h1><p class="sub small">Enter the details as they appear on the taxpayer's BIR Form 2303. Next you record the registration status and connect Xero.</p></div></section>
+    <article class="panel"><form class="rec" data-form="add" style="border-top:0;margin-top:0;padding-top:0" novalidate>
+      <div class="rec-row">${f('add-name', 'Registered name', 'required placeholder="As on the 2303"')}${f('add-trade', 'Trade name (optional)')}${f('add-tin', 'TIN (9 digits)', 'required inputmode="numeric" placeholder="000-000-000"')}</div>
+      <div class="rec-row">${f('add-branch', 'Branch code', 'value="00000"')}${f('add-rdo', 'RDO code', 'placeholder="e.g. 047"')}<div class="field"><label for="add-class">Classification</label><select id="add-class"><option>MICRO</option><option selected>SMALL</option><option>MEDIUM</option><option>LARGE</option></select></div></div>
+      ${f('add-address', 'Registered address')}
+      <div class="rec-row">${f('add-zip', 'ZIP code')}${f('add-contact', 'Contact number')}${f('add-email', 'Email')}</div>
+      <div style="display:flex;gap:10px;align-items:center"><button class="btn primary" type="submit">Add taxpayer</button><button class="btn ghost" type="button" data-act="view" data-v="overview">Cancel</button></div>
+      <div class="err-text" id="add-err" hidden></div>
+    </form></article>`;
 }
 
 // ---------------------------------------------------------------- rules
@@ -736,8 +888,9 @@ async function downloadPdf(btn) {
   try {
     const map = MAPS[run.form];
     templates[run.form] ??= await (await fetch(map.template)).arrayBuffer();
-    const bytes = await renderPdf(window.PDFLib, templates[run.form].slice(0), run, layoutForm(run, map), { watermark: 'SAMPLE DATA - NOT FOR FILING', producer: 'PH Tax Engine (demo)' });
-    const name = `BIR-${run.form}_${run.taxpayer.tin}_${run.year}Q${run.quarter}${run.period.split ? `_${run.period.from}` : ''}_SAMPLE.pdf`;
+    const sample = isSampleTp(tpById(S.tp));
+    const bytes = await renderPdf(window.PDFLib, templates[run.form].slice(0), run, layoutForm(run, map), { watermark: sample ? 'SAMPLE DATA - NOT FOR FILING' : null, producer: 'PH Tax Engine' });
+    const name = `BIR-${run.form}_${run.taxpayer.tin}_${run.year}Q${run.quarter}${run.period.split ? `_${run.period.from}` : ''}${sample ? '_SAMPLE' : '_FOR-REVIEW'}.pdf`;
     if (await offerFile(name, bytes, 'application/pdf')) { logEvent('form.download', `${run.form} ${run.period.from}..${run.period.to}`, { file: name }); save(); }
   } finally {
     btn.disabled = false;
@@ -748,7 +901,7 @@ async function downloadCsv() {
   if (!run) return;
   const { classified, unmapped } = classifyFor(S.tp)(linesIn(S.tp, run.period.from, run.period.to));
   const csv = workpaperCsv({ ...run, runId: 'demo' }, [...classified, ...unmapped]);
-  const name = `workpaper_${run.form}_${run.taxpayer.tin}_${run.year}Q${run.quarter}_SAMPLE.csv`;
+  const name = `workpaper_${run.form}_${run.taxpayer.tin}_${run.year}Q${run.quarter}${isSampleTp(tpById(S.tp)) ? '_SAMPLE' : ''}.csv`;
   if (await offerFile(name, csv, 'text/csv')) { logEvent('workpaper.download', `${run.form} ${run.period.from}..${run.period.to}`, { file: name }); save(); }
 }
 
@@ -768,7 +921,7 @@ function render(focus) {
   const ctx = { q, open: openFindings(S.tp, q.runs) };
   renderTour();
   renderRail(ctx);
-  const views = { overview: viewOverview, data: viewData, return: viewReturn, trace: viewTrace, audit: viewAudit, rules: viewRules };
+  const views = { overview: viewOverview, data: viewData, return: viewReturn, trace: viewTrace, audit: viewAudit, rules: viewRules, add: viewAdd };
   $('#view').innerHTML = (views[S.view] ?? viewOverview)(ctx);
   save();
   const list = $("#doc-list");
@@ -793,10 +946,13 @@ function go(patch, focus) {
 const ACT = {
   step(el) {
     const i = Number(el.dataset.i);
-    const s = STEPS[i];
+    const s = steps()[i];
+    if (!s) return;
     if (!S.visited.includes(i)) S.visited.push(i);
-    if (s.trace) S.trace[s.tp] = s.trace;
-    if (s.view === 'data') S.doc[s.tp] = LEDGER[s.tp].docs.find((d) => d.number === 'INV-0142')?.id;
+    const { start, end } = quarterBounds(2026, 3);
+    const featured = featuredDoc(s.tp, start, end) ?? featuredDoc(s.tp);
+    if (s.view === 'trace' && featured) S.trace[s.tp] = featured.number;
+    if (s.view === 'data' && featured) S.doc[s.tp] = featured.id;
     go({ tp: s.tp, view: s.view, year: 2026, quarter: 3, seg: 0 }, s.focus);
   },
   tp(el) { go({ tp: Number(el.dataset.id), seg: 0 }); window.scrollTo({ top: 0 }); },
@@ -837,6 +993,21 @@ const ACT = {
     window.scrollTo({ top: 0 });
   },
   'dl-pdf'(el) { downloadPdf(el); },
+  async 'seed-xero'(el) {
+    el.disabled = true;
+    toast('Creating PH tax rates, invoices and bills in the Xero organisation...');
+    try {
+      const r = await api('seed-xero', { taxpayerId: S.tp });
+      toast(`Created ${r.documentsCreated} documents in Xero. Syncing...`);
+      const sy = await api('sync', { taxpayerId: S.tp, from: S.syncFrom ?? '2025-07-01', to: S.syncTo ?? quarterBounds(S.year, S.quarter).end });
+      await loadData();
+      render();
+      toast(`Synced ${sy.documents} documents from ${sy.org}.`);
+    } catch (err) {
+      toast(err.message);
+      el.disabled = false;
+    }
+  },
   'dl-csv'() { downloadCsv(); },
 };
 
@@ -858,11 +1029,18 @@ document.addEventListener('change', (e) => {
     const [y, q] = el.value.split('-').map(Number);
     go({ year: y, quarter: q, seg: 0 });
   } else if (el.dataset.act === 'map') {
-    const [tpId, source, code] = el.dataset.key.split('|');
-    S.mapOverrides[el.dataset.key] = el.value;
+    const { tp: tpId, source, key: code } = el.dataset;
+    const done = () => {
+      toast(el.value ? `${code} now maps to ${el.value}. Returns recomputed.` : `${code} is unmapped. Its lines are held out and flagged.`);
+      render();
+    };
+    if (LIVE) {
+      api('mappings', { taxpayerId: Number(tpId), source, key: code, phClass: el.value }).then(loadData).then(done).catch((err) => toast(err.message));
+      return;
+    }
+    S.mapOverrides[`${tpId}|${source}|${code}`] = el.value;
     logEvent('taxmap.set', `taxpayer ${tpId}`, { source, key: code, phClass: el.value || 'UNMAPPED' });
-    toast(el.value ? `${code} now maps to ${el.value}. Returns recomputed.` : `${code} is unmapped. Its lines are held out and flagged.`);
-    render();
+    done();
   } else if (el.dataset.act === 'trace-pick') {
     S.trace[S.tp] = el.value;
     render();
@@ -870,6 +1048,10 @@ document.addEventListener('change', (e) => {
     const key = `${S.tp}|${S.year}Q${S.quarter}`;
     const val = el.value.replace(/,/g, '').trim();
     if (val && !(Number(val) >= 0)) { toast('Enter an amount such as 12500.00'); return; }
+    if (LIVE) {
+      api('inputs', { taxpayerId: S.tp, period: `${S.year}Q${S.quarter}`, name: el.dataset.name, amount: val ? Number(val) : 0 }).then(loadData).then(() => render()).catch((err) => toast(err.message));
+      return;
+    }
     S.inputs[key] = { ...(S.inputs[key] ?? {}), [el.dataset.name]: val ? Number(val) : 0 };
     logEvent('inputs.set', `taxpayer ${S.tp} ${S.year}Q${S.quarter}`, { [el.dataset.name]: val || '0' });
     render();
@@ -895,6 +1077,13 @@ document.addEventListener('submit', (e) => {
     const err = $('#reg-err');
     const problem = !/^\d{4}-\d{2}-\d{2}$/.test(eff) ? 'Enter the effective date from the updated 2303.' : !cor ? 'Enter the 2303 / COR reference. The engine will not record a status without it.' : null;
     if (problem) { err.textContent = problem; err.hidden = false; return; }
+    if (LIVE) {
+      api('registrations', { taxpayerId: S.tp, status, effectiveFrom: eff, corReference: cor, note })
+        .then(loadData)
+        .then(() => { S.regDraft[S.tp] = {}; S.seg = 0; render('p-path'); toast(`Recorded ${status === 'VAT' ? 'VAT' : 'Non-VAT'} from ${eff}. Returns recomputed.`); })
+        .catch((x) => { err.textContent = x.message; err.hidden = false; });
+      return;
+    }
     const id = Math.max(...SEED_REGS.map((r) => r.id), ...S.regsAdded.map((r) => r.id)) + 1;
     S.regsAdded.push({ id, taxpayer_id: S.tp, status, effective_from: eff, cor_reference: cor, source: 'BIR_2303', entered_by: VIEWER, entered_at: new Date().toISOString(), note: note || null });
     logEvent('registration.record', `taxpayer ${S.tp}`, { status, effectiveFrom: eff, cor, source: 'BIR_2303' });
@@ -905,12 +1094,58 @@ document.addEventListener('submit', (e) => {
   } else if (form.dataset.form === 'ack') {
     const note = form.querySelector('input').value.trim();
     if (!note) { form.querySelector('input').focus(); return; }
+    if (LIVE) {
+      api('acks', { taxpayerId: S.tp, key: form.dataset.key, kind: form.dataset.kind, note })
+        .then(loadData)
+        .then(() => { render(); toast('Acknowledged. The registration status was not changed.'); })
+        .catch((x) => toast(x.message));
+      return;
+    }
     S.acks[form.dataset.key] = { note, by: VIEWER, at: new Date().toISOString() };
     logEvent('exception.acknowledge', `taxpayer ${S.tp}`, { kind: form.dataset.kind, note });
     render();
     toast('Acknowledged. The registration status was not changed.');
+  } else if (form.dataset.form === 'sync') {
+    const from = $('#sync-from').value;
+    const to = $('#sync-to').value;
+    S.syncFrom = from;
+    S.syncTo = to;
+    const btn = $('#sync-btn');
+    btn.disabled = true;
+    btn.textContent = 'Syncing from Xero...';
+    api('sync', { taxpayerId: S.tp, from, to })
+      .then(async (r) => {
+        await loadData();
+        render();
+        toast(`Synced ${r.documents} documents from ${r.org}: ${r.inserted} new, ${r.updated} updated, ${r.removed} removed.${r.baseCurrency !== 'PHP' ? ` Base currency is ${r.baseCurrency}, not PHP.` : ''}`);
+      })
+      .catch((x) => { toast(x.message); btn.disabled = false; btn.textContent = 'Sync from Xero now'; });
+  } else if (form.dataset.form === 'add') {
+    const v = (id) => $(id).value.trim();
+    const err = $('#add-err');
+    const payload = { registeredName: v('#add-name').toUpperCase(), tradeName: v('#add-trade'), tin: v('#add-tin'), branchCode: v('#add-branch') || '00000', rdoCode: v('#add-rdo'), classification: $('#add-class').value, address: v('#add-address').toUpperCase(), zip: v('#add-zip'), contact: v('#add-contact'), email: v('#add-email') };
+    if (!payload.registeredName) { err.textContent = 'Enter the registered name.'; err.hidden = false; return; }
+    api('taxpayers', payload)
+      .then(async ({ id }) => {
+        await loadData();
+        go({ tp: id, view: 'overview', seg: 0 }, 'p-registration');
+        toast('Taxpayer added. Record the Form 2303 status, then connect Xero on the Xero data page.');
+      })
+      .catch((x) => { err.textContent = x.message; err.hidden = false; });
   }
 });
+
+if (LIVE) {
+  const xeroTp = TAXPAYERS.find((t) => t.source === 'xero');
+  const pill = document.querySelector('.topbar .pill');
+  if (pill) pill.innerHTML = `<span class="dot" style="background:var(--ok)"></span>Live${xeroTp ? ` \u00b7 Xero: ${esc(xeroTp.connection.org_name)}` : ' \u00b7 local server'}`;
+  $('#reset').hidden = true;
+  const qs = new URLSearchParams(location.search);
+  if (qs.get('tp') && TAXPAYERS.some((t) => t.id === Number(qs.get('tp')))) { S.tp = Number(qs.get('tp')); S.view = 'data'; }
+  const note = qs.get('msg') || qs.get('err');
+  if (note) setTimeout(() => toast(note), 300);
+  if (qs.toString()) window.history.replaceState(null, '', location.pathname + location.hash);
+}
 
 let resetArmed = false;
 $('#reset').addEventListener('click', (e) => {
