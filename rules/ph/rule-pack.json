@@ -1,0 +1,52 @@
+{
+  "id": "PH-BASELINE",
+  "version": "2026.09-draft",
+  "jurisdiction": "PH",
+  "note": "Baseline values from public sources for demonstration only. The client supplies the authoritative rule set; every value here is replaceable without code changes.",
+
+  "params": {
+    "vat.rate": [
+      { "from": "2006-02-01", "value": 0.12, "ref": "NIRC Sec. 106/108 as amended by RA 9337" }
+    ],
+    "vat.registration_threshold": [
+      { "from": "2018-01-01", "value": 3000000, "ref": "NIRC Sec. 109(BB) as amended by RA 10963 (TRAIN)" }
+    ],
+    "vat.threshold_advisory_ratio": [
+      { "from": "2018-01-01", "value": 0.8, "ref": "Firm policy: warn at 80% of threshold (configurable)" }
+    ],
+    "vat.threshold_window_months": [
+      { "from": "2018-01-01", "value": 12, "ref": "NIRC Sec. 236(G): gross sales/receipts for the past 12 months" }
+    ],
+    "pt.rate.PT010": [
+      { "from": "2018-01-01", "to": "2020-06-30", "value": 0.03, "ref": "NIRC Sec. 116" },
+      { "from": "2020-07-01", "to": "2023-06-30", "value": 0.01, "ref": "RA 11534 (CREATE) temporary reduction" },
+      { "from": "2023-07-01", "value": 0.03, "ref": "NIRC Sec. 116 (rate reverts)" }
+    ],
+    "vat.output_basis": [
+      { "from": "2000-01-01", "value": "STATUTORY", "ref": "Output VAT = rate x VATable sales; recorded ledger tax is reconciled, not trusted" }
+    ],
+    "vat.input_basis": [
+      { "from": "2000-01-01", "value": "RECORDED", "ref": "Input VAT limited to tax shown on supplier VAT invoice (as booked)" }
+    ],
+    "recon.tolerance": [
+      { "from": "2000-01-01", "value": 1.0, "ref": "Per-document variance tolerance, PHP" }
+    ]
+  },
+
+  "classes": {
+    "SALE_REGULAR":                "Sale of goods/services in the ordinary course (VATable if VAT-registered; subject to percentage tax if non-VAT)",
+    "SALE_ZERO_RATED":             "Zero-rated sale (Sec. 106(A)(2), 108(B))",
+    "SALE_EXEMPT":                 "VAT-exempt sale under Sec. 109 other than 109(BB); outside percentage tax",
+    "PURCHASE_DOMESTIC":           "Domestic purchase of goods/services with input VAT",
+    "PURCHASE_SERVICES_NONRES":    "Services rendered by non-residents (VAT self-assessed)",
+    "PURCHASE_IMPORT":             "Importation with VAT paid to BOC",
+    "PURCHASE_NO_INPUT_TAX":       "Domestic purchase with no input tax (non-VAT supplier)",
+    "PURCHASE_EXEMPT_IMPORT":      "VAT-exempt importation",
+    "OUT_OF_SCOPE":                "Not a sale/purchase for tax purposes (transfers, owner drawings, etc.)"
+  },
+
+  "paths": {
+    "VAT":     { "form": "2550Q", "description": "Quarterly VAT return" },
+    "NON_VAT": { "form": "2551Q", "description": "Quarterly percentage tax return (ATC PT010)" }
+  }
+}

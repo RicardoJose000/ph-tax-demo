@@ -1,0 +1,22 @@
+{
+  "note": "Starting mapping from ledger tax codes to PH classes, keyed DIRECTION:CODE. Copied per taxpayer on connect and editable per taxpayer. Codes not listed are never guessed: they raise an UNMAPPED_TAX_CODE exception.",
+  "xero": {
+    "SALE:OUTPUT": "SALE_REGULAR",
+    "SALE:ZERORATEDOUTPUT": "SALE_ZERO_RATED",
+    "SALE:EXEMPTOUTPUT": "SALE_EXEMPT",
+    "SALE:NONE": "SALE_REGULAR",
+    "PURCHASE:INPUT": "PURCHASE_DOMESTIC",
+    "PURCHASE:NRSERVICES": "PURCHASE_SERVICES_NONRES",
+    "PURCHASE:IMPORTINPUT": "PURCHASE_IMPORT",
+    "PURCHASE:EXEMPTEXPENSES": "PURCHASE_NO_INPUT_TAX",
+    "PURCHASE:NONE": "PURCHASE_NO_INPUT_TAX",
+    "PURCHASE:BASEXCLUDED": "OUT_OF_SCOPE",
+    "SALE:BASEXCLUDED": "OUT_OF_SCOPE"
+  },
+  "qbo": {
+    "SALE:TAX": "SALE_REGULAR",
+    "SALE:NON": "SALE_REGULAR",
+    "PURCHASE:TAX": "PURCHASE_DOMESTIC",
+    "PURCHASE:NON": "PURCHASE_NO_INPUT_TAX"
+  }
+}
