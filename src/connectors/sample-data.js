@@ -86,6 +86,27 @@ export function bakeshopDocs() {
   return docs;
 }
 
+/**
+ * Withholding profiles for suppliers, keyed by the contact name used in the
+ * ledger. In production these come from the payee master data defined in the
+ * requirements pack. atc: null means no expanded withholding applies, with the reason.
+ */
+export const SAMPLE_PAYEES = {
+  'Paseo Tower Property Mgmt Corp.': {
+    tin: '444555666', branch: '00000', type: 'CORPORATION', registeredName: 'PASEO TOWER PROPERTY MGMT CORP',
+    address: '2F SAMPLE PLAZA PASEO DE ROXAS MAKATI CITY', zip: '1226', atc: 'WC100', nature: 'Rental of office space',
+  },
+  'R. Santos (freelance designer, non-VAT)': {
+    tin: '777888999', branch: '00000', type: 'INDIVIDUAL', registeredName: 'SANTOS RAFAEL MENDOZA',
+    address: '18 SAMPLE ST BRGY SAN ANTONIO PASIG CITY', zip: '1605', atc: 'WI010', nature: 'Professional fees (design)',
+    note: 'Sworn declaration on file: gross income up to PHP 3M, non-VAT',
+  },
+  'TechHub Computer Center Inc.': { atc: null, reason: 'Purchase of goods: EWT (WC158) applies only when the payor is a top withholding agent' },
+  'CloudCore Hosting Pte Ltd (Singapore)': { atc: null, reason: 'Non-resident foreign corporation: final withholding tax (1601-FQ), not expanded withholding' },
+  'Bureau of Customs': { atc: null, reason: 'Duties and VAT paid on importation: not an income payment' },
+  'Golden Grain Flour Mills': { atc: null, reason: 'Purchase of goods: EWT (WC158) applies only when the payor is a top withholding agent' },
+};
+
 export const SAMPLE_ORGS = {
   makati: { name: 'Makati Digital Services Inc. (sample)', docs: makatiDigitalDocs },
   bakeshop: { name: 'Dela Cruz Bakeshop (sample)', docs: bakeshopDocs },

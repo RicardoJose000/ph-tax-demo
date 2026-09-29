@@ -1,0 +1,826 @@
+{
+ "form": "2307",
+ "version": "January 2018 (ENCS)",
+ "template": "templates/bir/2307_Jan2018_ENCS_v3.pdf",
+ "cellWidth": 13.4,
+ "intCells": 12,
+ "grids": {},
+ "fields": [
+  {
+   "type": "comb",
+   "page": 0,
+   "value": "hdr.from",
+   "xs": [
+    151.7,
+    164.4,
+    177.8,
+    191.6,
+    204.0,
+    217.0,
+    230.4,
+    244.2,
+    256.7
+   ],
+   "y": 118.8
+  },
+  {
+   "type": "comb",
+   "page": 0,
+   "value": "hdr.to",
+   "xs": [
+    399.3,
+    412.0,
+    425.4,
+    439.2,
+    451.7,
+    464.7,
+    478.1,
+    491.9,
+    504.3
+   ],
+   "y": 118.8
+  },
+  {
+   "type": "comb",
+   "page": 0,
+   "value": "hdr.payeeTin1",
+   "xs": [
+    206.3,
+    219.3,
+    232.7,
+    246.3
+   ],
+   "y": 149.8
+  },
+  {
+   "type": "comb",
+   "page": 0,
+   "value": "hdr.payeeTin2",
+   "xs": [
+    258.3,
+    271.0,
+    284.3,
+    297.6
+   ],
+   "y": 149.8
+  },
+  {
+   "type": "comb",
+   "page": 0,
+   "value": "hdr.payeeTin3",
+   "xs": [
+    310.0,
+    322.8,
+    336.1,
+    349.4
+   ],
+   "y": 149.8
+  },
+  {
+   "type": "comb",
+   "page": 0,
+   "value": "hdr.payeeBranch",
+   "xs": [
+    361.5,
+    375.9,
+    391.0,
+    407.0,
+    421.9,
+    435.5
+   ],
+   "y": 149.8
+  },
+  {
+   "type": "comb",
+   "page": 0,
+   "value": "hdr.payorTin1",
+   "xs": [
+    206.4,
+    219.6,
+    233.0,
+    246.6
+   ],
+   "y": 265.0
+  },
+  {
+   "type": "comb",
+   "page": 0,
+   "value": "hdr.payorTin2",
+   "xs": [
+    258.9,
+    271.6,
+    285.0,
+    298.3
+   ],
+   "y": 265.0
+  },
+  {
+   "type": "comb",
+   "page": 0,
+   "value": "hdr.payorTin3",
+   "xs": [
+    310.7,
+    323.5,
+    336.9,
+    350.2
+   ],
+   "y": 265.0
+  },
+  {
+   "type": "comb",
+   "page": 0,
+   "value": "hdr.payorBranch",
+   "xs": [
+    362.3,
+    376.7,
+    391.8,
+    407.8,
+    422.7,
+    436.3
+   ],
+   "y": 265.0
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "hdr.payeeName",
+   "x": 38,
+   "y": 176,
+   "size": 9,
+   "maxChars": 95
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "hdr.payeeAddress",
+   "x": 38.5,
+   "y": 204.5,
+   "size": 8.5,
+   "maxChars": 90
+  },
+  {
+   "type": "comb",
+   "page": 0,
+   "value": "hdr.payeeZip",
+   "xs": [
+    541.8,
+    553.9,
+    567.3,
+    580.5,
+    591.8
+   ],
+   "y": 205
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "hdr.payorName",
+   "x": 38,
+   "y": 291.5,
+   "size": 9,
+   "maxChars": 95
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "hdr.payorAddress",
+   "x": 38.5,
+   "y": 320,
+   "size": 8.5,
+   "maxChars": 90
+  },
+  {
+   "type": "comb",
+   "page": 0,
+   "value": "hdr.payorZip",
+   "xs": [
+    541.8,
+    553.9,
+    567.3,
+    580.5,
+    591.8
+   ],
+   "y": 320.5
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "rows.0.desc",
+   "x": 21,
+   "y": 375.1,
+   "size": 6.2,
+   "maxChars": 48
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "rows.0.atc",
+   "x": 198.5,
+   "y": 375.1,
+   "size": 7.5,
+   "anchor": "center"
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.0.m1",
+   "xRight": 289.5,
+   "y": 375.1,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.0.m2",
+   "xRight": 363.8,
+   "y": 375.1,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.0.m3",
+   "xRight": 435.9,
+   "y": 375.1,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.0.total",
+   "xRight": 508.0,
+   "y": 375.1,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.0.tax",
+   "xRight": 594.0,
+   "y": 375.1,
+   "size": 7.5
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "rows.1.desc",
+   "x": 21,
+   "y": 388.8,
+   "size": 6.2,
+   "maxChars": 48
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "rows.1.atc",
+   "x": 198.5,
+   "y": 388.8,
+   "size": 7.5,
+   "anchor": "center"
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.1.m1",
+   "xRight": 289.5,
+   "y": 388.8,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.1.m2",
+   "xRight": 363.8,
+   "y": 388.8,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.1.m3",
+   "xRight": 435.9,
+   "y": 388.8,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.1.total",
+   "xRight": 508.0,
+   "y": 388.8,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.1.tax",
+   "xRight": 594.0,
+   "y": 388.8,
+   "size": 7.5
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "rows.2.desc",
+   "x": 21,
+   "y": 402.5,
+   "size": 6.2,
+   "maxChars": 48
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "rows.2.atc",
+   "x": 198.5,
+   "y": 402.5,
+   "size": 7.5,
+   "anchor": "center"
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.2.m1",
+   "xRight": 289.5,
+   "y": 402.5,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.2.m2",
+   "xRight": 363.8,
+   "y": 402.5,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.2.m3",
+   "xRight": 435.9,
+   "y": 402.5,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.2.total",
+   "xRight": 508.0,
+   "y": 402.5,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.2.tax",
+   "xRight": 594.0,
+   "y": 402.5,
+   "size": 7.5
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "rows.3.desc",
+   "x": 21,
+   "y": 416.2,
+   "size": 6.2,
+   "maxChars": 48
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "rows.3.atc",
+   "x": 198.5,
+   "y": 416.2,
+   "size": 7.5,
+   "anchor": "center"
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.3.m1",
+   "xRight": 289.5,
+   "y": 416.2,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.3.m2",
+   "xRight": 363.8,
+   "y": 416.2,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.3.m3",
+   "xRight": 435.9,
+   "y": 416.2,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.3.total",
+   "xRight": 508.0,
+   "y": 416.2,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.3.tax",
+   "xRight": 594.0,
+   "y": 416.2,
+   "size": 7.5
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "rows.4.desc",
+   "x": 21,
+   "y": 429.9,
+   "size": 6.2,
+   "maxChars": 48
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "rows.4.atc",
+   "x": 198.5,
+   "y": 429.9,
+   "size": 7.5,
+   "anchor": "center"
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.4.m1",
+   "xRight": 289.5,
+   "y": 429.9,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.4.m2",
+   "xRight": 363.8,
+   "y": 429.9,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.4.m3",
+   "xRight": 435.9,
+   "y": 429.9,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.4.total",
+   "xRight": 508.0,
+   "y": 429.9,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.4.tax",
+   "xRight": 594.0,
+   "y": 429.9,
+   "size": 7.5
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "rows.5.desc",
+   "x": 21,
+   "y": 443.6,
+   "size": 6.2,
+   "maxChars": 48
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "rows.5.atc",
+   "x": 198.5,
+   "y": 443.6,
+   "size": 7.5,
+   "anchor": "center"
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.5.m1",
+   "xRight": 289.5,
+   "y": 443.6,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.5.m2",
+   "xRight": 363.8,
+   "y": 443.6,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.5.m3",
+   "xRight": 435.9,
+   "y": 443.6,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.5.total",
+   "xRight": 508.0,
+   "y": 443.6,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.5.tax",
+   "xRight": 594.0,
+   "y": 443.6,
+   "size": 7.5
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "rows.6.desc",
+   "x": 21,
+   "y": 457.2,
+   "size": 6.2,
+   "maxChars": 48
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "rows.6.atc",
+   "x": 198.5,
+   "y": 457.2,
+   "size": 7.5,
+   "anchor": "center"
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.6.m1",
+   "xRight": 289.5,
+   "y": 457.2,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.6.m2",
+   "xRight": 363.8,
+   "y": 457.2,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.6.m3",
+   "xRight": 435.9,
+   "y": 457.2,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.6.total",
+   "xRight": 508.0,
+   "y": 457.2,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.6.tax",
+   "xRight": 594.0,
+   "y": 457.2,
+   "size": 7.5
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "rows.7.desc",
+   "x": 21,
+   "y": 470.9,
+   "size": 6.2,
+   "maxChars": 48
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "rows.7.atc",
+   "x": 198.5,
+   "y": 470.9,
+   "size": 7.5,
+   "anchor": "center"
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.7.m1",
+   "xRight": 289.5,
+   "y": 470.9,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.7.m2",
+   "xRight": 363.8,
+   "y": 470.9,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.7.m3",
+   "xRight": 435.9,
+   "y": 470.9,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.7.total",
+   "xRight": 508.0,
+   "y": 470.9,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.7.tax",
+   "xRight": 594.0,
+   "y": 470.9,
+   "size": 7.5
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "rows.8.desc",
+   "x": 21,
+   "y": 484.6,
+   "size": 6.2,
+   "maxChars": 48
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "rows.8.atc",
+   "x": 198.5,
+   "y": 484.6,
+   "size": 7.5,
+   "anchor": "center"
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.8.m1",
+   "xRight": 289.5,
+   "y": 484.6,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.8.m2",
+   "xRight": 363.8,
+   "y": 484.6,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.8.m3",
+   "xRight": 435.9,
+   "y": 484.6,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.8.total",
+   "xRight": 508.0,
+   "y": 484.6,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.8.tax",
+   "xRight": 594.0,
+   "y": 484.6,
+   "size": 7.5
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "rows.9.desc",
+   "x": 21,
+   "y": 498.3,
+   "size": 6.2,
+   "maxChars": 48
+  },
+  {
+   "type": "text",
+   "page": 0,
+   "value": "rows.9.atc",
+   "x": 198.5,
+   "y": 498.3,
+   "size": 7.5,
+   "anchor": "center"
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.9.m1",
+   "xRight": 289.5,
+   "y": 498.3,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.9.m2",
+   "xRight": 363.8,
+   "y": 498.3,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.9.m3",
+   "xRight": 435.9,
+   "y": 498.3,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.9.total",
+   "xRight": 508.0,
+   "y": 498.3,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "rows.9.tax",
+   "xRight": 594.0,
+   "y": 498.3,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "totals.m1",
+   "xRight": 289.5,
+   "y": 511.9,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "totals.m2",
+   "xRight": 363.8,
+   "y": 511.9,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "totals.m3",
+   "xRight": 435.9,
+   "y": 511.9,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "totals.total",
+   "xRight": 508.0,
+   "y": 511.9,
+   "size": 7.5
+  },
+  {
+   "type": "textAmount",
+   "page": 0,
+   "value": "totals.tax",
+   "xRight": 594.0,
+   "y": 511.9,
+   "size": 7.5
+  }
+ ]
+}

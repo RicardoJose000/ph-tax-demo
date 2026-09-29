@@ -244,6 +244,7 @@ select.map.unmapped{border-color:var(--crit);color:var(--crit)}
 .sheet img{display:block;width:100%;height:auto;user-select:none;-webkit-user-drag:none}
 .g{position:absolute;line-height:1;font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;font-weight:700;color:var(--pen);white-space:pre;transform:translate(-50%,-84%);pointer-events:none}
 .g.right{transform:translate(-100%,-84%)}
+.g.left{transform:translate(0,-84%)}
 .rg{position:absolute;border-radius:2px;cursor:pointer;transition:background .2s,box-shadow .2s}
 .rg:hover{background:var(--hl)}
 .rg.in{background:var(--hl);box-shadow:inset 0 0 0 1px var(--hl-line)}
@@ -367,8 +368,8 @@ footer.foot code{font:500 11.5px var(--f-mono);color:var(--ink-2)}
 </div>
 
 <footer class="foot">
-  <span>Calculations run in your browser using the engine's own modules: <code>normalize-core</code> <code>classify-core</code> <code>vat</code> <code>percentageTax</code> <code>threshold-core</code> <code>return-core</code> <code>fill-core</code>. The server build uses the same files.</span>
-  <span>Official forms: BIR 2550Q (April 2024 ENCS), BIR 2551Q (January 2018 ENCS), unmodified.</span>
+  <span>Calculations run in your browser using the engine's own modules: <code>normalize-core</code> <code>classify-core</code> <code>vat</code> <code>percentageTax</code> <code>threshold-core</code> <code>withholding-core</code> <code>return-core</code> <code>fill-core</code>. The server build uses the same files.</span>
+  <span>Official forms, unmodified: BIR 2550Q (April 2024 ENCS), 2551Q, 2307 and 0619-E (January 2018 ENCS).</span>
 </footer>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>

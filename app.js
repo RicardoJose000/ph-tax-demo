@@ -2,13 +2,14 @@
 // Every figure on this page is produced by the engine's own modules (the
 // same files the server imports). This file only holds demo state and UI.
 
-import { SAMPLE_ORGS } from './src/connectors/sample-data.js';
+import { SAMPLE_ORGS, SAMPLE_PAYEES } from './src/connectors/sample-data.js';
+import { computeWithholding, compute0619E, dueDate0619E } from './src/engine/withholding-core.js';
 import { normalizeXeroDocument } from './src/connectors/normalize-core.js';
 import { classifyWithMap, defaultMappings } from './src/engine/classify-core.js';
 import { assessThresholdCore } from './src/engine/threshold-core.js';
 import { quarterBounds, segmentsFromHistory, computeReturn, registrationOn, chainToPayable, payableItem } from './src/engine/return-core.js';
 import { validatePack, packLabel } from './src/engine/rules-core.js';
-import { layoutForm, renderPdf } from './src/forms/fill-core.js';
+import { layoutForm, renderPdf, context2307, context0619E } from './src/forms/fill-core.js';
 import { workpaperCsv } from './src/forms/workpaper.js';
 import { fmt } from './src/money.js';
 
@@ -32,6 +33,7 @@ const I = {
   form: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></svg>',
   trace: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="19" r="2"/><path d="M6 7v6a4 4 0 0 0 4 4h6"/></svg>',
   audit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>',
+  coin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h5M15 16l2-2 2 2"/></svg>',
   rules: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5M9 7h6"/></svg>',
   download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M7 11l5 5 5-5M5 20h14"/></svg>',
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg>',
@@ -46,15 +48,17 @@ const getJson = async (p) => {
   if (!r.ok) throw new Error(`Could not load ${p}`);
   return r.json();
 };
-const [pack, defaults, map2550Q, map2551Q] = await Promise.all([
+const [pack, defaults, map2550Q, map2551Q, map2307, map0619E] = await Promise.all([
   getJson('rules/ph/rule-pack.json'),
   getJson('rules/ph/default-tax-code-map.json'),
   getJson('src/forms/maps/2550Q.json'),
   getJson('src/forms/maps/2551Q.json'),
+  getJson('src/forms/maps/2307.json'),
+  getJson('src/forms/maps/0619-E.json'),
 ]);
 validatePack(pack);
-const MAPS = { '2550Q': map2550Q, '2551Q': map2551Q };
-const PAGE_H = { '2550Q': 1008, '2551Q': 936 };
+const MAPS = { '2550Q': map2550Q, '2551Q': map2551Q, '2307': map2307, '0619-E': map0619E };
+const PAGE_H = { '2550Q': 1008, '2551Q': 936, '2307': 936, '0619-E': 792 };
 
 const LIVE = window.PH_MODE === 'live';
 const titleCase = (v) => String(v ?? '').toLowerCase().replace(/\b([a-z])/g, (m) => m.toUpperCase());
@@ -266,6 +270,7 @@ function renderRail(ctx) {
     ['overview', 'Overview', I.overview],
     ['data', 'Xero data', I.data],
     ['return', 'Return &amp; form', I.form],
+    ['withholding', 'Withholding', I.coin],
     ['trace', 'Trace', I.trace],
     ['audit', 'Audit trail', I.audit],
     ['rules', 'Rules &amp; mapping', I.rules],
@@ -621,19 +626,19 @@ function itemPage(form, key) {
   return f ? f.page : null;
 }
 
-function sheetHTML(run, pageIdx, active, related = []) {
+function sheetHTML(run, pageIdx, active, related = [], layout = null) {
   const map = MAPS[run.form];
-  const lay = layoutForm(run, map);
+  const lay = layout ?? layoutForm(run, map);
   const W = 612;
   const H = PAGE_H[run.form];
   const p = (v, d) => ((v / d) * 100).toFixed(3);
   const regions = lay.regions.filter((r) => r.page === pageIdx).map((r) => {
     const k = r.key.slice(5);
     const cls = k === active ? ' on' : related.includes(k) ? ' in' : '';
-    return `<div class="rg${cls}" data-act="item" data-k="${esc(k)}" title="${esc(`${k} ${run.items[k]?.label ?? ''}`)}" style="left:${p(r.x0, W)}%;top:${p(r.y0, H)}%;width:${p(r.x1 - r.x0, W)}%;height:${p(r.y1 - r.y0, H)}%"></div>`;
+    return `<div class="rg${cls}" ${['0619-E', '2307'].includes(run.form) ? '' : 'data-act="item" '}data-k="${esc(k)}" title="${esc(`${k} ${run.items?.[k]?.label ?? ''}`)}" style="left:${p(r.x0, W)}%;top:${p(r.y0, H)}%;width:${p(r.x1 - r.x0, W)}%;height:${p(r.y1 - r.y0, H)}%"></div>`;
   }).join('');
   const glyphs = lay.glyphs.filter((g) => g.page === pageIdx).map((g) =>
-    `<span class="g${g.anchor === 'right' ? ' right' : ''}" style="left:${p(g.x, W)}%;top:${p(g.y, H)}%;font-size:${p(g.size, W)}cqw">${esc(g.text)}</span>`).join('');
+    `<span class="g${g.anchor === 'right' ? ' right' : g.anchor === 'left' ? ' left' : ''}" style="left:${p(g.x, W)}%;top:${p(g.y, H)}%;font-size:${p(g.size, W)}cqw">${esc(g.text)}</span>`).join('');
   return `<div class="sheet"><img src="assets/forms/${run.form}-p${pageIdx + 1}.png" width="1224" height="${H * 2}" alt="Official BIR Form ${run.form}, page ${pageIdx + 1}, populated by the engine">${regions}${glyphs}${isSampleTp(tpById(S.tp)) ? '<div class="wm" aria-hidden="true"><span>SAMPLE DATA &middot; NOT FOR FILING</span></div>' : ''}</div>`;
 }
 
@@ -811,6 +816,102 @@ function viewAudit() {
     <article class="panel"><div class="scroll-x"><table><thead><tr><th>#</th><th>Time (UTC)</th><th>Actor</th><th>Action</th><th>Detail</th><th>Hash</th></tr></thead><tbody id="audit-body"><tr><td colspan="6" class="muted small">Computing hashes&hellip;</td></tr></tbody></table></div></article>`;
 }
 
+// ---------------------------------------------------------------- withholding (preview)
+
+function withholdingFor(tpId) {
+  const { start, end } = quarterBounds(S.year, S.quarter);
+  const { classified } = classifyFor(tpId)(linesIn(tpId, start, end));
+  return { w: computeWithholding(pack, classified, SAMPLE_PAYEES, start), start, end };
+}
+
+function viewWithholding() {
+  const tp = tpById(S.tp);
+  const { w, start, end } = withholdingFor(tp.id);
+  const wh = S.wh ?? {};
+  const head = `<section class="vhead"><div><div class="eyebrow">${esc(tp.display)} &middot; ${S.year} Q${S.quarter}</div><h1>Withholding tax</h1>
+      <p class="sub small">Expanded withholding (EWT) on the same Xero bills, on the official BIR 2307 and 0619-E. Rates are public baseline values; your requirements pack sets the final rules.</p></div>
+      <span class="chip warn">Preview</span></section>`;
+  if (!w.rows.length && !w.skipped.length) {
+    return `${head}<article class="panel"><p class="muted">No purchases in this quarter.</p></article>`;
+  }
+  const monthLbl = (m) => new Date(`${m}-01T00:00:00Z`).toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const baseTotal = w.rows.reduce((a, r) => a + r.base, 0);
+  const kpis = `<div class="kpis">
+      <div class="kpi"><div class="eyebrow">Income payments subject to EWT</div><div class="v">${peso(baseTotal)}</div></div>
+      <div class="kpi"><div class="eyebrow">EWT withheld this quarter</div><div class="v big">${peso(w.total)}</div></div>
+      <div class="kpi"><div class="eyebrow">2307 certificates</div><div class="v">${w.certificates.length}</div></div>
+      <div class="kpi"><div class="eyebrow">0619-E remittances</div><div class="v">${w.months.slice(0, 2).filter((m) => w.byMonth[m]).length} of 2</div></div></div>`;
+
+  const rows = [...w.rows.map((r) => `<tr><td class="num small"><b>${esc(r.line.doc_number)}</b></td><td class="num small">${esc(r.line.doc_date)}</td><td class="small">${esc(r.payee)}</td>
+        <td><span class="chip vat mono">${esc(r.atc)}</span></td><td class="r num small">${Math.round(r.rate * 1000) / 10}%</td><td class="r">${money(r.base)}</td><td class="r"><b>${money(r.ewt)}</b></td></tr>`),
+    ...w.skipped.map((x) => `<tr class="zero"><td class="num small muted">${esc(x.line.doc_number)}</td><td class="num small muted">${esc(x.line.doc_date)}</td><td class="small muted">${esc(x.line.contact)}</td>
+        <td colspan="4" class="small muted">${esc(x.reason)}</td></tr>`)].join('');
+  const ledger = `<article class="panel" id="p-ewt"><div class="panel-h"><div><h2>Purchases and withholding</h2><p class="small muted">Each bill line is matched to its payee's ATC; the rate comes from the rule pack by payment date and applies to the amount excluding VAT. Anything not subject to EWT is listed with the reason.</p></div></div>
+      <div class="scroll-x"><table><thead><tr><th>Bill</th><th>Date</th><th>Payee</th><th>ATC</th><th class="r">Rate</th><th class="r">Base (PHP)</th><th class="r">EWT</th></tr></thead><tbody>${rows}</tbody></table></div></article>`;
+
+  // 0619-E: first two months of the quarter
+  const mIdx = Math.min(wh.m ?? 0, 1);
+  const month = w.months[mIdx];
+  const rem = compute0619E(w, month);
+  const run0619 = { form: '0619-E', taxpayer: { name: tp.registered_name }, year: S.year, quarter: S.quarter, rulePack: packLabel(pack), items: rem.items };
+  const lay0619 = layoutForm(run0619, MAPS['0619-E'], context0619E(tp, rem, dueDate0619E(month)));
+  const remItems = ['14', '16', '18'].map((k) => `<div class="item${k === '14' ? ' on' : ''}"><span class="key">${k}</span><span class="lab">${esc(rem.items[k].label)}</span><span>${money(rem.items[k].value)}</span></div>`).join('');
+  const remSources = rem.items['14'].sources.map((x) => `<div class="small" style="display:flex;justify-content:space-between;gap:10px"><span><b class="mono">${esc(x.docNumber)}</b> <span class="muted">${esc(x.contact)} &middot; ${esc(x.note)}</span></span>${money(x.amount)}</div>`).join('') || '<div class="small muted">No EWT withheld in this month.</div>';
+  const f0619 = `<article class="panel" id="p-0619"><div class="panel-h"><div><h2>BIR 0619-E &middot; monthly remittance</h2><p class="small muted">Due ${esc(niceDate(dueDate0619E(month)))}. The third month (${esc(monthLbl(w.months[2]))}, ${esc(fmt(w.byMonth[w.months[2]]))}) goes on the quarterly 1601-EQ.</p></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><div class="pages">${[0, 1].map((i) => `<button type="button" class="${i === mIdx ? 'on' : ''}" data-act="wh-month" data-i="${i}">${esc(monthLbl(w.months[i]))}</button>`).join('')}</div>
+        <button type="button" class="btn primary" data-act="dl-0619">${I.download}Download 0619-E</button></div></div>
+      <div class="ret-grid"><div class="sheet-wrap">${sheetHTML(run0619, 0, '14', ['16', '18'], lay0619)}</div>
+        <div class="items"><div class="igroup"><h3>Part II &middot; Tax remittance</h3>${remItems}</div><div class="lineage">${remSources}</div></div></div></article>`;
+
+  // 2307: one per payee
+  const pIdx = Math.min(wh.p ?? 0, Math.max(w.certificates.length - 1, 0));
+  const cert = w.certificates[pIdx];
+  let f2307 = '';
+  if (cert) {
+    const run2307 = { form: '2307', taxpayer: { name: tp.registered_name }, year: S.year, quarter: S.quarter, rulePack: packLabel(pack), items: {} };
+    const lay2307 = layoutForm(run2307, MAPS['2307'], context2307(tp, cert, start, end));
+    const atcRows = cert.atcs.map((a) => `<tr><td><span class="chip vat mono">${esc(a.atc)}</span></td><td class="small">${esc(a.description)}</td><td class="r">${money(a.total)}</td><td class="r"><b>${money(a.tax)}</b></td></tr>`).join('');
+    f2307 = `<article class="panel" id="p-2307"><div class="panel-h"><div><h2>BIR 2307 &middot; certificates of creditable tax withheld</h2><p class="small muted">One per payee for ${S.year} Q${S.quarter}, with income payments by month of the quarter.</p></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><div class="pages">${w.certificates.map((c, i) => `<button type="button" class="${i === pIdx ? 'on' : ''}" data-act="wh-payee" data-i="${i}">${esc(c.payee.split(' (')[0])}</button>`).join('')}</div>
+        <button type="button" class="btn primary" data-act="dl-2307">${I.download}Download 2307</button></div></div>
+      <div class="ret-grid"><div class="sheet-wrap">${sheetHTML(run2307, 0, null, [], lay2307)}</div>
+        <div class="items"><div class="kv" style="margin-bottom:10px"><div>Payee</div><div>${esc(cert.profile.registeredName)}</div><div>TIN</div><div class="num">${esc(fmtTin(cert.profile.tin))}-${esc(cert.profile.branch)}</div><div>Payee type</div><div>${esc(titleCase(cert.profile.type))}</div>${cert.profile.note ? `<div>Note</div><div class="small">${esc(cert.profile.note)}</div>` : ''}</div>
+          <table><thead><tr><th>ATC</th><th>Income payment</th><th class="r">Quarter total</th><th class="r">Tax withheld</th></tr></thead><tbody>${atcRows}</tbody></table></div></div></article>`;
+  }
+  return `${head}${kpis}${ledger}${f0619}${f2307}`;
+}
+
+async function downloadWithholding(btn, form) {
+  if (!window.PDFLib) { toast('The PDF library did not load. Check your connection and reload.'); return; }
+  const tp = tpById(S.tp);
+  const { w, start, end } = withholdingFor(tp.id);
+  const wh = S.wh ?? {};
+  let ctx;
+  let name;
+  if (form === '0619-E') {
+    const month = w.months[Math.min(wh.m ?? 0, 1)];
+    ctx = context0619E(tp, compute0619E(w, month), dueDate0619E(month));
+    name = `BIR-0619-E_${tp.tin}_${month}`;
+  } else {
+    const cert = w.certificates[Math.min(wh.p ?? 0, w.certificates.length - 1)];
+    if (!cert) return;
+    ctx = context2307(tp, cert, start, end);
+    name = `BIR-2307_${tp.tin}_to_${cert.profile.tin}_${S.year}Q${S.quarter}`;
+  }
+  btn.disabled = true;
+  try {
+    const map = MAPS[form];
+    const runLike = { form, taxpayer: { name: tp.registered_name }, year: S.year, quarter: S.quarter, rulePack: packLabel(pack) };
+    templates[form] ??= await (await fetch(map.template)).arrayBuffer();
+    const sample = isSampleTp(tp);
+    const bytes = await renderPdf(window.PDFLib, templates[form].slice(0), runLike, layoutForm(runLike, map, ctx), { watermark: sample ? 'SAMPLE DATA - NOT FOR FILING' : null, producer: 'PH Tax Engine' });
+    const file = `${name}${sample ? '_SAMPLE' : '_FOR-REVIEW'}.pdf`;
+    if (await offerFile(file, bytes, 'application/pdf')) { logEvent('form.download', `${form} ${S.year}Q${S.quarter}`, { file }); save(); }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 // ---------------------------------------------------------------- add taxpayer (live)
 
 function viewAdd() {
@@ -921,7 +1022,7 @@ function render(focus) {
   const ctx = { q, open: openFindings(S.tp, q.runs) };
   renderTour();
   renderRail(ctx);
-  const views = { overview: viewOverview, data: viewData, return: viewReturn, trace: viewTrace, audit: viewAudit, rules: viewRules, add: viewAdd };
+  const views = { overview: viewOverview, data: viewData, return: viewReturn, trace: viewTrace, audit: viewAudit, rules: viewRules, add: viewAdd, withholding: viewWithholding };
   $('#view').innerHTML = (views[S.view] ?? viewOverview)(ctx);
   save();
   const list = $("#doc-list");
@@ -993,6 +1094,10 @@ const ACT = {
     window.scrollTo({ top: 0 });
   },
   'dl-pdf'(el) { downloadPdf(el); },
+  'dl-0619'(el) { downloadWithholding(el, '0619-E'); },
+  'dl-2307'(el) { downloadWithholding(el, '2307'); },
+  'wh-month'(el) { S.wh = { ...(S.wh ?? {}), m: Number(el.dataset.i) }; render(); },
+  'wh-payee'(el) { S.wh = { ...(S.wh ?? {}), p: Number(el.dataset.i) }; render(); },
   async 'seed-xero'(el) {
     el.disabled = true;
     toast('Creating PH tax rates, invoices and bills in the Xero organisation...');
@@ -1169,7 +1274,7 @@ function applyHash() {
   const h = location.hash.slice(1);
   const step = ['step1', 'step2', 'step3', 'step4'].indexOf(h);
   if (step >= 0) return ACT.step({ dataset: { i: String(step) } });
-  if (['overview', 'data', 'return', 'trace', 'audit', 'rules'].includes(h)) return go({ view: h });
+  if (['overview', 'data', 'return', 'withholding', 'trace', 'audit', 'rules'].includes(h)) return go({ view: h });
   render();
 }
 window.addEventListener('hashchange', applyHash);

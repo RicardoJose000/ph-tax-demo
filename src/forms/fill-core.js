@@ -5,7 +5,7 @@ import { fmt } from '../money.js';
 // (forms/maps/<form>.json, measured from the PDF's own vector grid) into glyph
 // placements; renderPdf() draws them onto the unmodified template with pdf-lib.
 
-const ALWAYS_PRINT = { '2550Q': ['15', '21', '26'], '2551Q': ['14', '19', '24', 'S1.7'] };
+const ALWAYS_PRINT = { '2550Q': ['15', '21', '26'], '2551Q': ['14', '19', '24', 'S1.7'], '0619-E': ['14', '16', '18'] };
 
 const pad2 = (n) => String(n).padStart(2, '0');
 const mmddyyyy = (iso) => `${iso.slice(5, 7)}${iso.slice(8, 10)}${iso.slice(0, 4)}`;
@@ -76,8 +76,7 @@ function cellBounds(map, field) {
  *   'center' (x is the cell centre) or 'right' (x is the right edge).
  *   key names what the glyph shows: "item:31A", "hdr.name", ...
  */
-export function layoutForm(run, map) {
-  const ctx = formContext(run);
+export function layoutForm(run, map, ctx = formContext(run)) {
   const always = new Set(ALWAYS_PRINT[run.form] ?? []);
   const glyphs = [];
   const regions = [];
@@ -114,6 +113,17 @@ export function layoutForm(run, map) {
     if (field.type === 'textAmount') {
       if (v == null) continue;
       put(field.page, field.xRight, field.y, fmt(Number(v)), field.size, field.value, 'right');
+      continue;
+    }
+
+    if (field.type === 'text') {
+      if (v == null || v === '') continue;
+      let text = String(v);
+      if (field.maxChars && text.length > field.maxChars) {
+        overflow.push({ field: field.value, text, cells: field.maxChars });
+        text = text.slice(0, field.maxChars);
+      }
+      put(field.page, field.x, field.y, text, field.size ?? 9, field.value, field.anchor ?? 'left');
       continue;
     }
 
@@ -155,7 +165,7 @@ export async function renderPdf(PDFLib, templateBytes, run, layout, { watermark 
   for (const g of layout.glyphs) {
     const page = pages[g.page];
     const w = font.widthOfTextAtSize(g.text, g.size);
-    const x = g.anchor === 'right' ? g.x - w : g.x - w / 2;
+    const x = g.anchor === 'right' ? g.x - w : g.anchor === 'left' ? g.x : g.x - w / 2;
     page.drawText(g.text, { x, y: page.getHeight() - g.y, size: g.size, font, color: ink });
   }
 
@@ -178,4 +188,48 @@ export async function renderPdf(PDFLib, templateBytes, run, layout, { watermark 
   pdf.setSubject(`Prepared${run.runId ? ` from run #${run.runId}` : ''} with rule pack ${run.rulePack}. For review before filing.`);
   pdf.setProducer(producer);
   return pdf.save();
+}
+
+// ---------------------------------------------------------------- withholding forms
+
+const TIN = (t) => String(t ?? '').replace(/\D/g, '').padStart(9, '0');
+const upper = (v) => String(v ?? '').toUpperCase();
+
+function partyContext(prefix, p) {
+  const tin = TIN(p.tin);
+  return {
+    [`${prefix}Tin1`]: tin.slice(0, 3), [`${prefix}Tin2`]: tin.slice(3, 6), [`${prefix}Tin3`]: tin.slice(6, 9),
+    [`${prefix}Branch`]: p.branch ?? p.branch_code ?? '00000',
+    [`${prefix}Name`]: upper(p.registeredName ?? p.registered_name ?? p.name),
+    [`${prefix}Address`]: upper(p.address), [`${prefix}Zip`]: p.zip ?? '',
+  };
+}
+
+/** BIR 2307 for one payee and quarter. Up to 10 ATC rows fit the form. */
+export function context2307(taxpayer, cert, from, to) {
+  const rows = cert.atcs.slice(0, 10).map((a) => ({
+    desc: cert.profile.nature || a.description, atc: a.atc, m1: a.months[0] || null, m2: a.months[1] || null, m3: a.months[2] || null, total: a.total, tax: a.tax,
+  }));
+  const sum = (k) => rows.reduce((s, r) => s + (r[k] ?? 0), 0);
+  return {
+    hdr: { from: mmddyyyy(from), to: mmddyyyy(to), ...partyContext('payee', cert.profile), ...partyContext('payor', taxpayer) },
+    rows,
+    totals: { m1: sum('m1') || null, m2: sum('m2') || null, m3: sum('m3') || null, total: sum('total'), tax: sum('tax') },
+    items: {},
+  };
+}
+
+/** BIR 0619-E for one month. */
+export function context0619E(taxpayer, remittance, dueDate) {
+  const tin = TIN(taxpayer.tin);
+  const [addr1, addr2] = splitAddress(taxpayer.address);
+  const m = remittance.month;
+  return {
+    hdr: {
+      month: `${m.slice(5, 7)}${m.slice(0, 4)}`, due: mmddyyyy(dueDate), amended: false, withheld: remittance.items['14'].value > 0,
+      tin1: tin.slice(0, 3), tin2: tin.slice(3, 6), tin3: tin.slice(6, 9), branch: taxpayer.branch_code ?? '00000', rdo: taxpayer.rdo_code ?? '',
+      name: upper(taxpayer.registered_name), addr1, addr2, zip: taxpayer.zip ?? '', contact: taxpayer.contact ?? '', email: upper(taxpayer.email), category: 'PRIVATE',
+    },
+    items: remittance.items,
+  };
 }
