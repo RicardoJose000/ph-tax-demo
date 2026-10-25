@@ -4,7 +4,7 @@
 
 import { SAMPLE_ORGS, SAMPLE_PAYEES } from './src/connectors/sample-data.js';
 import { computeWithholding, compute0619E, dueDate0619E } from './src/engine/withholding-core.js';
-import { normalizeXeroDocument } from './src/connectors/normalize-core.js';
+import { normalizeXeroDocument, normalizeQboDocument, qboDocInfo } from './src/connectors/normalize-core.js';
 import { classifyWithMap, defaultMappings } from './src/engine/classify-core.js';
 import { assessThresholdCore } from './src/engine/threshold-core.js';
 import { quarterBounds, segmentsFromHistory, computeReturn, registrationOn, chainToPayable, payableItem } from './src/engine/return-core.js';
@@ -94,14 +94,40 @@ function docDateOf(doc) {
   return m ? new Date(Number(m[1])).toISOString().slice(0, 10) : String(doc.Date ?? '').slice(0, 10);
 }
 
+const DOC_TYPE = { ACCREC: 'Sales invoice', ACCPAY: 'Bill', ACCRECCREDIT: 'Sales credit note', ACCPAYCREDIT: 'Supplier credit note' };
+const QBO_LABEL = { Invoice: 'Sales invoice', SalesReceipt: 'Sales receipt', CreditMemo: 'Credit memo', RefundReceipt: 'Refund receipt', Bill: 'Bill', VendorCredit: 'Supplier credit', Purchase: 'Expense' };
+const LEDGER_NAME = { xero: 'Xero', qbo: 'QuickBooks Online' };
+
+/**
+ * One source document as the review screens need it. Each ledger has its own
+ * payload shape; m holds the few facts the screens show, the same for both.
+ */
+function docEntry({ doc, source, base }) {
+  if (source === 'qbo') {
+    const info = qboDocInfo(doc._entity, doc);
+    const label = doc._entity === 'Purchase' && info.credit ? 'Card refund' : QBO_LABEL[doc._entity] ?? doc._entity;
+    return {
+      id: info.id, number: doc.DocNumber ?? `${doc._entity} ${doc.Id}`, date: doc.TxnDate,
+      raw: normalizeQboDocument(doc._entity, doc, base ?? 'PHP', doc._codeRates ?? null),
+      m: { type: doc._entity, label, status: 'POSTED', contact: info.contact ?? '', currency: info.currency ?? base ?? 'PHP', total: info.total, credit: info.credit, sale: info.sales },
+    };
+  }
+  return {
+    id: doc.InvoiceID ?? doc.CreditNoteID, number: doc.InvoiceNumber ?? doc.CreditNoteNumber ?? '(no number)', date: docDateOf(doc),
+    raw: normalizeXeroDocument(doc, base ?? 'PHP', source),
+    m: { type: doc.Type, label: DOC_TYPE[doc.Type], status: doc.Status, contact: doc.Contact?.Name ?? '', currency: doc.CurrencyCode, total: doc.Total, credit: doc.Type.endsWith('CREDIT'), sale: doc.Type.startsWith('ACCREC') },
+  };
+}
+
 function buildLedger(tpId, entries) {
-  const docs = entries.map(({ doc, source, base }) => {
-    const lines = normalizeXeroDocument(doc, base ?? 'PHP', source).map((l) => ({
+  const docs = entries.map((entry) => {
+    const { raw, ...d } = docEntry(entry);
+    const lines = raw.map((l) => ({
       id: ++lineSeq, taxpayer_id: tpId, source: l.source, source_doc_id: l.sourceDocId, source_line_id: l.sourceLineId,
       doc_type: l.docType, doc_number: l.docNumber, doc_date: l.docDate, doc_status: l.docStatus, contact: l.contact,
       description: l.description, account_code: l.accountCode, source_tax_code: l.sourceTaxCode, net: l.net, tax: l.tax, gross: l.gross, currency: l.currency,
     }));
-    return { doc, source, id: doc.InvoiceID ?? doc.CreditNoteID, number: doc.InvoiceNumber ?? doc.CreditNoteNumber ?? '(no number)', date: docDateOf(doc), lines };
+    return { doc: entry.doc, source: entry.source, ...d, lines };
   });
   docs.sort((a, b) => b.date.localeCompare(a.date) || String(b.number).localeCompare(String(a.number)));
   return { docs, lines: docs.flatMap((d) => d.lines).sort((a, b) => a.doc_date.localeCompare(b.doc_date) || a.id - b.id) };
@@ -122,7 +148,7 @@ async function loadData() {
   TAXPAYERS = SERVER.taxpayers.map((t) => ({
     ...t,
     display: t.trade_name || titleCase(t.registered_name),
-    blurb: [t.classification ? titleCase(t.classification) : null, t.connection ? (t.source === 'xero' ? `Xero: ${t.connection.org_name}` : 'Sample organisation') : 'No data source yet'].filter(Boolean).join(' · '),
+    blurb: [t.classification ? titleCase(t.classification) : null, t.connection ? (LEDGER_NAME[t.source] ? `${LEDGER_NAME[t.source]}: ${t.connection.org_name ?? ''}` : 'Sample organisation') : 'No data source yet'].filter(Boolean).join(' · '),
   }));
   SEED_REGS = SERVER.registrations;
   for (const t of TAXPAYERS) {
@@ -141,7 +167,6 @@ const xeroUrl = (d) => {
     ACCPAYCREDIT: `https://go.xero.com/AccountsPayable/ViewCreditNote.aspx?creditNoteID=${id}`,
   }[d.doc.Type];
 };
-const DOC_TYPE = { ACCREC: 'Sales invoice', ACCPAY: 'Bill', ACCRECCREDIT: 'Sales credit note', ACCPAYCREDIT: 'Supplier credit note' };
 const CLASSES = Object.keys(pack.classes);
 
 // ---------------------------------------------------------------- state
@@ -228,7 +253,7 @@ function steps() {
       { t: 'Invoice to official form', d: 'INV-0142 traced through every formula to item 26 on the 2550Q.', tp: 1, view: 'trace', focus: 'p-trace' },
     ];
   }
-  const live = TAXPAYERS.find((t) => t.source === 'xero') ?? TAXPAYERS[0];
+  const live = TAXPAYERS.find((t) => LEDGER_NAME[t.source]) ?? TAXPAYERS[0];
   const nonVat = TAXPAYERS.find((t) => history(t.id).some((r) => r.status === 'NON_VAT')) ?? live;
   if (!live) return [];
   const org = live.connection?.org_name ?? 'Xero';
@@ -243,7 +268,7 @@ function steps() {
 /** A good document to show first: a multi-line sales invoice in the period, else any posted sale. */
 function featuredDoc(tpId, from, to) {
   const docs = (LEDGER[tpId]?.docs ?? []).filter((d) => d.lines.length && (!from || (d.date >= from && d.date <= to)));
-  return docs.find((d) => d.number === 'INV-0142') ?? docs.find((d) => d.doc.Type === 'ACCREC' && d.lines.length > 1) ?? docs.find((d) => d.doc.Type === 'ACCREC') ?? docs[0] ?? null;
+  return docs.find((d) => d.number === 'INV-0142') ?? docs.find((d) => d.m.sale && !d.m.credit && d.lines.length > 1) ?? docs.find((d) => d.m.sale && !d.m.credit) ?? docs[0] ?? null;
 }
 
 function renderTour() {
@@ -283,7 +308,7 @@ function renderRail(ctx) {
       <div class="tps stack" style="gap:8px">${TAXPAYERS.map((t) => `
         <button type="button" class="tp${t.id === S.tp ? ' active' : ''}" data-act="tp" data-id="${t.id}">
           <span class="tp-name">${esc(t.display)}</span>
-          <span class="tp-meta"><span class="num">${fmtTin(t.tin)}</span>${statusChip(registrationOn(history(t.id), end)?.status)}${LIVE && t.source === 'xero' ? '<span class="chip ok">Xero</span>' : ''}</span>
+          <span class="tp-meta"><span class="num">${fmtTin(t.tin)}</span>${statusChip(registrationOn(history(t.id), end)?.status)}${LIVE && LEDGER_NAME[t.source] ? `<span class="chip ok">${t.source === 'qbo' ? 'QBO' : 'Xero'}</span>` : ''}</span>
         </button>`).join('')}
         ${LIVE ? '<button type="button" class="btn ghost" style="justify-content:flex-start" data-act="view" data-v="add">+ Add taxpayer</button>' : ''}
       </div>
@@ -491,6 +516,13 @@ function jsonHTML(obj) {
 function normNotes(d) {
   const notes = [];
   const doc = d.doc;
+  if (d.source === 'qbo') {
+    if (d.m.credit) notes.push('Credit document: amounts are stored as negatives so they reduce the period totals.');
+    if (d.m.currency !== 'PHP') notes.push(`${d.m.currency} document converted to PHP at QuickBooks' exchange rate (${doc.ExchangeRate} PHP per ${d.m.currency}).`);
+    notes.push('QuickBooks states tax per rate for the whole document. Each rate is split over the lines whose tax code uses it, so zero-rated and exempt lines never carry VAT.');
+    notes.push('Each line keeps its QuickBooks line Id, so a re-sync updates it in place, and a transaction deleted in QuickBooks is removed on the next sync of its period.');
+    return notes;
+  }
   if (!d.lines.length) notes.push(`Status ${doc.Status}: not posted, so the normalizer skips it. Only AUTHORISED and PAID documents reach the ledger.`);
   if (doc.Type.endsWith('CREDIT')) notes.push('Credit note: amounts are stored as negatives so they reduce the period totals.');
   if (doc.CurrencyCode !== 'PHP') notes.push(`${doc.CurrencyCode} document converted to PHP at the document rate (${doc.CurrencyRate} ${doc.CurrencyCode} per PHP).`);
@@ -501,7 +533,7 @@ function normNotes(d) {
 
 function connectionPanel(tp, L) {
   const posted = L.docs.filter((d) => d.lines.length).length;
-  const credits = L.docs.filter((d) => d.doc.Type.endsWith('CREDIT')).length;
+  const credits = L.docs.filter((d) => d.m.credit).length;
   const kpis = `<div class="kpis" style="margin-top:14px">
         <div class="kpi"><div class="eyebrow">Documents pulled</div><div class="v">${L.docs.length}</div></div>
         <div class="kpi"><div class="eyebrow">Posted to ledger</div><div class="v">${posted}</div></div>
@@ -517,23 +549,31 @@ function connectionPanel(tp, L) {
       <div class="kv">${endpoints}${scopes}<div>Security</div><div class="small">Tokens encrypted at rest (AES-256-GCM), refreshed automatically, rate limits respected</div></div>${kpis}</article>`;
   }
   const c = tp.connection;
-  if (!c || tp.source !== 'xero') {
-    const action = SERVER.xero.configured
-      ? `<a class="btn primary" href="connect/xero?taxpayer=${tp.id}">${I.data}Connect to Xero</a>`
-      : '<p class="err-text">Xero is not configured on this server yet: add XERO_CLIENT_ID and XERO_CLIENT_SECRET to .env and restart.</p>';
-    return `<article class="panel" id="p-source"><div class="panel-h"><div><h2>Connect to Xero</h2><p class="small muted">Authorise read access to this taxpayer's Xero organisation. You sign in on Xero's own page, so this app never sees your Xero password.</p></div></div>${action}</article>`;
+  const ledgerName = LEDGER_NAME[tp.source];
+  if (!c || !ledgerName) {
+    const actions = [
+      SERVER.xero.configured ? `<a class="btn primary" href="connect/xero?taxpayer=${tp.id}">${I.data}Connect to Xero</a>` : '',
+      SERVER.qbo?.configured ? `<a class="btn primary" href="connect/qbo?taxpayer=${tp.id}">${I.data}Connect to QuickBooks Online</a>` : '',
+    ].filter(Boolean);
+    const action = actions.length
+      ? `<div style="display:flex;gap:8px;flex-wrap:wrap">${actions.join('')}</div>`
+      : '<p class="err-text">No accounting system is configured on this server yet: add the XERO_* or QBO_* client settings to .env and restart.</p>';
+    return `<article class="panel" id="p-source"><div class="panel-h"><div><h2>Connect an accounting system</h2><p class="small muted">Authorise access to this taxpayer's Xero organisation or QuickBooks Online company. You sign in on Xero's or Intuit's own page, so this app never sees the password, and it only reads.</p></div></div>${action}</article>`;
   }
   const { end } = quarterBounds(S.year, S.quarter);
-  const seed = SERVER.xero.writeEnabled
+  const seed = tp.source === 'xero' && SERVER.xero.writeEnabled
     ? '<div class="small muted" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">Demo organisation: <button type="button" class="btn" style="padding:3px 10px" data-act="seed-xero">Create sample PH invoices in this Xero org</button></div>'
     : '';
+  const liveEndpoints = tp.source === 'qbo'
+    ? '<div>Endpoints</div><div class="mono small">GET /v3/company/{realm}/query: Invoice, SalesReceipt, CreditMemo, RefundReceipt, Bill, VendorCredit, Purchase, TaxCode (paged, date-filtered)</div>'
+    : endpoints;
   return `<article class="panel" id="p-source">
-      <div class="panel-h"><div><h2>Connected to ${esc(c.org_name)}</h2><p class="small muted">Live Xero organisation &middot; base currency ${esc(c.base_currency || 'shown after the first sync')} &middot; last sync ${esc(c.last_sync_at ? `${c.last_sync_at} UTC` : 'not yet')}</p></div><span class="chip ok">${I.check.replace('<svg', '<svg width="12" height="12"')} Connected</span></div>
-      <div class="kv">${endpoints}<div>Security</div><div class="small">OAuth 2.0; tokens encrypted at rest (AES-256-GCM) and refreshed automatically</div></div>
+      <div class="panel-h"><div><h2>Connected to ${esc(c.org_name ?? ledgerName)}</h2><p class="small muted">Live ${ledgerName} ${tp.source === 'qbo' ? 'company' : 'organisation'} &middot; base currency ${esc(c.base_currency || 'shown after the first sync')} &middot; last sync ${esc(c.last_sync_at ? `${c.last_sync_at} UTC` : 'not yet')}</p></div><span class="chip ok">${I.check.replace('<svg', '<svg width="12" height="12"')} Connected</span></div>
+      <div class="kv">${liveEndpoints}<div>Security</div><div class="small">OAuth 2.0; tokens encrypted at rest (AES-256-GCM) and refreshed automatically</div></div>
       <form class="rec" data-form="sync" style="margin-top:12px"><div class="rec-row">
         <div class="field"><label for="sync-from">From</label><input id="sync-from" type="date" value="${esc(S.syncFrom ?? '2025-07-01')}"></div>
         <div class="field"><label for="sync-to">To</label><input id="sync-to" type="date" value="${esc(S.syncTo ?? end)}"></div>
-        <div class="field"><span>&nbsp;</span><button class="btn primary" type="submit" id="sync-btn">${I.data}Sync from Xero now</button></div></div>
+        <div class="field"><span>&nbsp;</span><button class="btn primary" type="submit" id="sync-btn" data-ledger="${ledgerName}">${I.data}Sync from ${ledgerName} now</button></div></div>
         ${seed}
       </form>${kpis}</article>`;
 }
@@ -566,33 +606,33 @@ function viewData() {
   const tp = tpById(S.tp);
   if (!tp) return '<section class="vhead"><h1>No taxpayers yet</h1></section>';
   const L = LEDGER[tp.id] ?? { docs: [], lines: [] };
-  const org = tp.source === 'xero' ? tp.connection?.org_name ?? tp.display : !LIVE ? SAMPLE_ORGS[tp.org].name.replace(' (sample)', '') : tp.display;
+  const org = LEDGER_NAME[tp.source] ? tp.connection?.org_name ?? tp.display : !LIVE ? SAMPLE_ORGS[tp.org].name.replace(' (sample)', '') : tp.display;
   if (!L.docs.length) {
     return `<section class="vhead"><div><div class="eyebrow">Accounting data</div><h1>${esc(org)}</h1><p class="sub small">No documents pulled yet.</p></div></section>${connectionPanel(tp, L)}`;
   }
   const selId = S.doc[tp.id] ?? featuredDoc(tp.id)?.id ?? L.docs[0].id;
   const sel = L.docs.find((d) => d.id === selId) ?? L.docs[0];
   const posted = L.docs.filter((d) => d.lines.length).length;
-  const credits = L.docs.filter((d) => d.doc.Type.endsWith('CREDIT')).length;
+  const credits = L.docs.filter((d) => d.m.credit).length;
   const mapRows = mappingRows(tp, L);
 
   return `
-    <section class="vhead"><div><div class="eyebrow">Accounting data</div><h1>${esc(org)}</h1><p class="sub small">${tp.source === 'xero' ? 'Documents pulled live from the Xero Accounting API.' : 'Documents in Xero Accounting API format, base currency PHP.'}</p></div></section>
+    <section class="vhead"><div><div class="eyebrow">Accounting data</div><h1>${esc(org)}</h1><p class="sub small">${tp.source === 'xero' ? 'Documents pulled live from the Xero Accounting API.' : tp.source === 'qbo' ? 'Transactions pulled live from the QuickBooks Online Accounting API.' : 'Documents in Xero Accounting API format, base currency PHP.'}</p></div></section>
     ${connectionPanel(tp, L)}
     <div class="split" id="p-docs">
       <article class="panel"><div class="panel-h"><h2>Documents</h2><span class="small muted">Select one to see the raw record</span></div>
         <div class="scroll-x" id="doc-list" style="max-height:600px;overflow:auto"><table>
           <thead><tr><th>Document</th><th>Date</th><th class="r">Total</th></tr></thead>
           <tbody>${L.docs.map((d) => `<tr class="click${d.id === sel.id ? ' sel' : ''}" data-act="doc" data-id="${esc(d.id)}" tabindex="0">
-            <td><div class="small" style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap"><b class="mono">${esc(d.number)}</b><span class="tiny muted">${esc(DOC_TYPE[d.doc.Type])}</span><span class="tiny mono status-${esc(d.doc.Status)}">${esc(d.doc.Status)}</span></div><div class="tiny muted">${esc(d.doc.Contact.Name)}</div></td>
+            <td><div class="small" style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap"><b class="mono">${esc(d.number)}</b><span class="tiny muted">${esc(d.m.label)}</span><span class="tiny mono status-${esc(d.m.status)}">${esc(d.m.status)}</span></div><div class="tiny muted">${esc(d.m.contact)}</div></td>
             <td class="num small">${esc(d.date)}</td>
-            <td class="r num small">${esc(d.doc.CurrencyCode)} ${esc(fmt(Math.round(d.doc.Total * 100)))}</td></tr>`).join('')}</tbody></table></div>
+            <td class="r num small">${esc(d.m.currency)} ${esc(fmt(Math.round(d.m.total * 100)))}</td></tr>`).join('')}</tbody></table></div>
       </article>
       <article class="panel">
-        <div class="panel-h"><div><h2>${esc(sel.number)} &middot; ${esc(DOC_TYPE[sel.doc.Type])}</h2><p class="small muted">${esc(sel.doc.Contact.Name)} &middot; ${esc(niceDate(sel.date))}</p></div>
+        <div class="panel-h"><div><h2>${esc(sel.number)} &middot; ${esc(sel.m.label)}</h2><p class="small muted">${esc(sel.m.contact)} &middot; ${esc(niceDate(sel.date))}</p></div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">${sel.source === 'xero' ? `<a class="btn" href="${xeroUrl(sel)}" target="_blank" rel="noopener">Open in Xero &#8599;</a>` : ''}${sel.lines.length ? `<button type="button" class="btn" data-act="trace-doc" data-n="${esc(sel.number)}">${I.trace}Trace to form</button>` : '<span class="chip warn">Not posted</span>'}</div></div>
-        <div class="eyebrow" style="margin-bottom:6px">Xero payload</div>
-        <pre class="json">${jsonHTML(sel.doc)}</pre>
+        <div class="eyebrow" style="margin-bottom:6px">${sel.source === 'qbo' ? 'QuickBooks' : 'Xero'} payload</div>
+        <pre class="json">${jsonHTML(sel.source === 'qbo' ? Object.fromEntries(Object.entries(sel.doc).filter(([k]) => !k.startsWith('_'))) : sel.doc)}</pre>
         <div class="eyebrow" style="margin:14px 0 6px">Normalized ledger lines</div>
         ${sel.lines.length ? `<div class="scroll-x"><table><thead><tr><th>Description</th><th>Tax code</th><th class="r">Net (PHP)</th><th class="r">Tax</th></tr></thead><tbody>
           ${sel.lines.map((l) => `<tr><td class="small">${esc(l.description)}</td><td class="num small">${esc(l.source_tax_code)}</td><td class="r">${money(Math.round(l.net * 100))}</td><td class="r">${money(Math.round(l.tax * 100))}</td></tr>`).join('')}</tbody></table></div>` : '<p class="small muted">No ledger lines.</p>'}
@@ -724,7 +764,7 @@ function viewTrace(ctx) {
   const inQuarter = L.docs.filter((d) => start && d.date >= start && d.date <= end);
   const pick = S.trace[tp.id] ?? featuredDoc(tp.id, start, end)?.number ?? inQuarter[0]?.number;
   const d = inQuarter.find((x) => x.number === pick) ?? inQuarter[0];
-  const options = inQuarter.map((x) => `<option value="${esc(x.number)}"${x === d ? ' selected' : ''}>${esc(x.number)} &middot; ${esc(x.doc.Contact.Name)}</option>`).join('');
+  const options = inQuarter.map((x) => `<option value="${esc(x.number)}"${x === d ? ' selected' : ''}>${esc(x.number)} &middot; ${esc(x.m.contact)}</option>`).join('');
   const head = `<section class="vhead"><div><div class="eyebrow">${esc(tp.display)} &middot; ${S.year} Q${S.quarter}</div><h1>Trace a transaction</h1><p class="sub small">Follow one document from the ledger to the populated official form.</p></div>
     <div class="field" style="min-width:260px"><label for="trace-pick">Document</label><select id="trace-pick" data-act="trace-pick">${options}</select></div></section>`;
   if (!d) return `${head}<article class="panel"><p class="muted">No documents in this quarter.</p></article>`;
@@ -742,10 +782,10 @@ function viewTrace(ctx) {
   const stage = (title, body) => `<li class="stage"><div class="stage-n" aria-hidden="true"></div><div class="panel"><h3>${title}</h3>${body}</div></li>`;
   const stages = [];
   stages.push(stage('Xero document', `<div class="kv">
-      <div>Type</div><div>${esc(DOC_TYPE[d.doc.Type])} <span class="mono tiny muted">${esc(d.doc.Type)}</span></div>
-      <div>Number</div><div class="mono">${esc(d.number)}</div><div>Contact</div><div>${esc(d.doc.Contact.Name)}</div>
-      <div>Date</div><div>${esc(niceDate(d.date))}</div><div>Status</div><div class="mono small status-${esc(d.doc.Status)}">${esc(d.doc.Status)}</div>
-      <div>Total</div><div class="num">${esc(d.doc.CurrencyCode)} ${esc(fmt(Math.round(d.doc.Total * 100)))}</div></div>
+      <div>Type</div><div>${esc(d.m.label)} <span class="mono tiny muted">${esc(d.m.type)}</span></div>
+      <div>Number</div><div class="mono">${esc(d.number)}</div><div>Contact</div><div>${esc(d.m.contact)}</div>
+      <div>Date</div><div>${esc(niceDate(d.date))}</div><div>Status</div><div class="mono small status-${esc(d.m.status)}">${esc(d.m.status)}</div>
+      <div>Total</div><div class="num">${esc(d.m.currency)} ${esc(fmt(Math.round(d.m.total * 100)))}</div></div>
     <details style="margin-top:10px"><summary class="small" style="cursor:pointer;color:var(--accent)">Show the Xero payload</summary><pre class="json" style="margin-top:8px">${jsonHTML(d.doc)}</pre></details>`));
   if (!d.lines.length) {
     stages.push(stage('Normalized ledger lines', `<p class="small">${esc(normNotes(d)[0])} Nothing below applies to this document.</p>`));
@@ -1217,14 +1257,15 @@ document.addEventListener('submit', (e) => {
     S.syncTo = to;
     const btn = $('#sync-btn');
     btn.disabled = true;
-    btn.textContent = 'Syncing from Xero...';
+    const ledger = btn.dataset.ledger || 'Xero';
+    btn.textContent = `Syncing from ${ledger}...`;
     api('sync', { taxpayerId: S.tp, from, to })
       .then(async (r) => {
         await loadData();
         render();
         toast(`Synced ${r.documents} documents from ${r.org}: ${r.inserted} new, ${r.updated} updated, ${r.removed} removed.${r.baseCurrency !== 'PHP' ? ` Base currency is ${r.baseCurrency}, not PHP.` : ''}`);
       })
-      .catch((x) => { toast(x.message); btn.disabled = false; btn.textContent = 'Sync from Xero now'; });
+      .catch((x) => { toast(x.message); btn.disabled = false; btn.textContent = `Sync from ${ledger} now`; });
   } else if (form.dataset.form === 'add') {
     const v = (id) => $(id).value.trim();
     const err = $('#add-err');
@@ -1234,16 +1275,16 @@ document.addEventListener('submit', (e) => {
       .then(async ({ id }) => {
         await loadData();
         go({ tp: id, view: 'overview', seg: 0 }, 'p-registration');
-        toast('Taxpayer added. Record the Form 2303 status, then connect Xero on the Xero data page.');
+        toast('Taxpayer added. Record the Form 2303 status, then connect Xero or QuickBooks Online on the accounting data page.');
       })
       .catch((x) => { err.textContent = x.message; err.hidden = false; });
   }
 });
 
 if (LIVE) {
-  const xeroTp = TAXPAYERS.find((t) => t.source === 'xero');
+  const liveTp = TAXPAYERS.find((t) => LEDGER_NAME[t.source]);
   const pill = document.querySelector('.topbar .pill');
-  if (pill) pill.innerHTML = `<span class="dot" style="background:var(--ok)"></span>Live${xeroTp ? ` \u00b7 Xero: ${esc(xeroTp.connection.org_name)}` : ' \u00b7 local server'}`;
+  if (pill) pill.innerHTML = `<span class="dot" style="background:var(--ok)"></span>Live${liveTp ? ` \u00b7 ${LEDGER_NAME[liveTp.source]}: ${esc(liveTp.connection.org_name ?? '')}` : ' \u00b7 local server'}`;
   $('#reset').hidden = true;
   const qs = new URLSearchParams(location.search);
   if (qs.get('tp') && TAXPAYERS.some((t) => t.id === Number(qs.get('tp')))) { S.tp = Number(qs.get('tp')); S.view = 'data'; }
